@@ -91,13 +91,10 @@ const DEFAULT_COUNSELORS = [
 ];
 
 const COURSES = {
-  APIDS: { key: 'APIDS', name: 'APIDS', defaultFee: 75000 },
   APIDA: { key: 'APIDA', name: 'APIDA', defaultFee: 65000 },
-  DA: { key: 'DA', name: 'DA', defaultFee: 50000 },
-  FDE: { key: 'FDE', name: 'FDE', defaultFee: 80000 },
-  AIML: { key: 'AIML', name: 'AIML', defaultFee: 90000 },
-  APCS: { key: 'APCS', name: 'APCS', defaultFee: 85000 },
-  '7 Days GenAI': { key: '7 Days GenAI', name: '7 Days GenAI', defaultFee: 15000 }
+  APIDS: { key: 'APIDS', name: 'APIDS', defaultFee: 75000 },
+  DAS: { key: 'DAS', name: 'DAS', defaultFee: 50000 },
+  FDE: { key: 'FDE', name: 'FDE', defaultFee: 80000 }
 };
 
 const contentTypes = {
