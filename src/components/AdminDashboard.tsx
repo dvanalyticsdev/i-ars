@@ -24,7 +24,7 @@ import {
   CalendarDays
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
-import { formatCurrency } from '../format';
+import { formatCourseLabel, formatCurrency } from '../format';
 import { MultiSelectFilter } from './MultiSelectFilter';
 
 interface AdminDashboardProps {
@@ -1326,7 +1326,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                   <div>
                     <span className="text-xs text-gray-400 block">Course Selected</span>
-                    <span className="font-medium text-gray-800">{selectedReg.courseName} ({selectedReg.courseKey})</span>
+                    <span className="font-medium text-gray-800">{formatCourseLabel(selectedReg.courseName, selectedReg.courseKey)}</span>
                   </div>
                   <div>
                     <span className="text-xs text-gray-400 block">Batch Start Date</span>
