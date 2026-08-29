@@ -776,6 +776,39 @@ const handleApi = async (request, response, url) => {
     return json(response, 200, { ok: true });
   }
 
+  const counselorProfileMatch = url.pathname.match(/^\/api\/counselors\/([^/]+)\/profile$/);
+  if (request.method === 'PATCH' && counselorProfileMatch) {
+    const id = decodeURIComponent(counselorProfileMatch[1]);
+    const body = await readJsonBody(request);
+    const name = String(body.name || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+
+    if (!name || !email) {
+      return json(response, 400, { message: 'Counselor name and email are required.' });
+    }
+
+    const counselor = await counselorsCollection.findOne({ id });
+    if (!counselor) {
+      return json(response, 404, { message: 'Counselor was not found.' });
+    }
+
+    try {
+      const updatedAt = new Date().toISOString();
+      await counselorsCollection.updateOne({ id }, { $set: { name, email, updatedAt } });
+      await registrationsCollection.updateMany(
+        { generatedByCounselorId: id },
+        { $set: { generatedByCounselorName: name } }
+      );
+
+      return json(response, 200, { ...sanitize(counselor), name, email, updatedAt });
+    } catch (error) {
+      if (error?.code === 11000) {
+        return json(response, 409, { message: 'Email address is already in use by another counselor.' });
+      }
+      throw error;
+    }
+  }
+
   const counselorStatusMatch = url.pathname.match(/^\/api\/counselors\/([^/]+)\/status$/);
   if (request.method === 'PATCH' && counselorStatusMatch) {
     const id = decodeURIComponent(counselorStatusMatch[1]);

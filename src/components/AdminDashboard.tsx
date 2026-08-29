@@ -22,7 +22,8 @@ import {
   Eraser,
   Download,
   CalendarDays,
-  Send
+  Send,
+  Pencil
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
 import { formatCourseLabel, formatCurrency } from '../format';
@@ -58,6 +59,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [cSuccess, setCSuccess] = useState<string | null>(null);
   const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
   const [activePasswordEditor, setActivePasswordEditor] = useState<string | null>(null);
+  const [profileDrafts, setProfileDrafts] = useState<Record<string, { name: string; email: string }>>({});
+  const [activeProfileEditor, setActiveProfileEditor] = useState<string | null>(null);
 
   // Admin Registration Form States
   const [adminCounselorId, setAdminCounselorId] = useState('');
@@ -323,6 +326,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       alert('Counselor password updated.');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to update counselor password.');
+    }
+  };
+
+  const handleStartProfileEdit = (counselor: Counselor) => {
+    setActiveProfileEditor(activeProfileEditor === counselor.id ? null : counselor.id);
+    setActivePasswordEditor(null);
+    setProfileDrafts(current => ({
+      ...current,
+      [counselor.id]: current[counselor.id] || { name: counselor.name, email: counselor.email }
+    }));
+  };
+
+  const handleUpdateCounselorProfile = async (id: string) => {
+    const draft = profileDrafts[id];
+    const name = (draft?.name || '').trim();
+    const email = (draft?.email || '').trim().toLowerCase();
+
+    if (!name || !email) {
+      alert('Counselor name and email are required.');
+      return;
+    }
+
+    try {
+      await db.updateCounselorProfile(id, name, email);
+      setActiveProfileEditor(null);
+      await onDataChange();
+      alert('Counselor details updated.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to update counselor details.');
     }
   };
 
@@ -1346,6 +1378,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
 
                           <button
+                            onClick={() => handleStartProfileEdit(counselor)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition-all hover:border-[#485d8b] hover:text-[#485d8b]"
+                            title="Edit counselor details"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            <span>Edit</span>
+                          </button>
+
+                          <button
                             onClick={() => setActivePasswordEditor(activePasswordEditor === counselor.id ? null : counselor.id)}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition-all hover:border-[#485d8b] hover:text-[#485d8b]"
                             title="Change Password"
@@ -1364,6 +1405,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                         </div>
                       </div>
+
+                      {activeProfileEditor === counselor.id && (
+                        <div className="mt-4 grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 md:grid-cols-[1fr_1fr_auto_auto] md:items-end">
+                          <div>
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                              Counselor Name
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Counselor name"
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                              value={profileDrafts[counselor.id]?.name || ''}
+                              onChange={(e) => setProfileDrafts(current => ({
+                                ...current,
+                                [counselor.id]: {
+                                  name: e.target.value,
+                                  email: current[counselor.id]?.email || counselor.email
+                                }
+                              }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                              Email Address
+                            </label>
+                            <input
+                              type="email"
+                              placeholder="counselor@example.com"
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                              value={profileDrafts[counselor.id]?.email || ''}
+                              onChange={(e) => setProfileDrafts(current => ({
+                                ...current,
+                                [counselor.id]: {
+                                  name: current[counselor.id]?.name || counselor.name,
+                                  email: e.target.value
+                                }
+                              }))}
+                            />
+                          </div>
+                          <button
+                            onClick={() => handleUpdateCounselorProfile(counselor.id)}
+                            className="rounded-lg bg-[#485d8b] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#3c4d73]"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setActiveProfileEditor(null)}
+                            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600 shadow-sm transition-colors hover:bg-gray-100"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
 
                       {activePasswordEditor === counselor.id && (
                         <div className="mt-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-end">

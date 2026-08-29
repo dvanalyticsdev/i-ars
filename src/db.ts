@@ -75,6 +75,12 @@ export const db = {
       method: 'DELETE'
     }),
 
+  updateCounselorProfile: (id: string, name: string, email: string) =>
+    apiRequest<Counselor>(`/api/counselors/${encodeURIComponent(id)}/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name, email })
+    }),
+
   deleteUnusedRegistration: (id: string) =>
     apiRequest<{ ok: true }>(`/api/registrations/${encodeURIComponent(id)}`, {
       method: 'DELETE'
