@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { db } from '../db';
-import { AppSettings, Counselor, DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, UserSession, COURSES, CourseKey } from '../types';
+import { AppSettings, Counselor, DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, UserSession, COURSES, CourseKey, OnboardingTemplate } from '../types';
 import { 
   Users, 
   FileCheck, 
@@ -23,7 +23,8 @@ import {
   Download,
   CalendarDays,
   Send,
-  Pencil
+  Pencil,
+  FileText
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
 import { formatCourseLabel, formatCurrency } from '../format';
@@ -35,6 +36,7 @@ interface AdminDashboardProps {
   settings: AppSettings;
   counselors: Counselor[];
   registrations: StudentRegistration[];
+  onboardingTemplates: OnboardingTemplate[];
   onDataChange: () => Promise<void>;
 }
 
@@ -44,9 +46,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   settings,
   counselors,
   registrations,
+  onboardingTemplates,
   onDataChange
 }) => {
-  const [activeTab, setActiveTab] = useState<'registrations' | 'counselors'>('registrations');
+  const [activeTab, setActiveTab] = useState<'registrations' | 'counselors' | 'templates'>('registrations');
   const [tokenAmount, setTokenAmount] = useState(settings.tokenAmount);
   const [tokenSaving, setTokenSaving] = useState(false);
   const [clearingRegistrations, setClearingRegistrations] = useState(false);
@@ -105,6 +108,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   } | null>(null);
   const [emailPreviewLoadingId, setEmailPreviewLoadingId] = useState<string | null>(null);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+  const [selectedTemplateCourse, setSelectedTemplateCourse] = useState<CourseKey>('APIDS');
+  const [templateSubjectDrafts, setTemplateSubjectDrafts] = useState<Record<string, string>>({});
+  const [templateBodyDrafts, setTemplateBodyDrafts] = useState<Record<string, string>>({});
+  const [templateSavingCourse, setTemplateSavingCourse] = useState<string | null>(null);
+
+  const getTemplate = (courseKey: CourseKey) =>
+    onboardingTemplates.find(template => template.courseKey === courseKey) || null;
+
+  const selectedTemplate = getTemplate(selectedTemplateCourse);
+  const templateSubjectDraft = templateSubjectDrafts[selectedTemplateCourse] ?? selectedTemplate?.subjectTemplate ?? '';
+  const templateBodyDraft = templateBodyDrafts[selectedTemplateCourse] ?? selectedTemplate?.bodyHtml ?? '';
 
   React.useEffect(() => {
     setTokenAmount(settings.tokenAmount);
@@ -117,6 +131,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setManualPaymentError(null);
     setManualPaymentSaving(false);
   }, [selectedReg?.id]);
+
+  React.useEffect(() => {
+    setTemplateSubjectDrafts(current => {
+      const next = { ...current };
+      for (const template of onboardingTemplates) {
+        if (next[template.courseKey] === undefined) {
+          next[template.courseKey] = template.subjectTemplate;
+        }
+      }
+      return next;
+    });
+    setTemplateBodyDrafts(current => {
+      const next = { ...current };
+      for (const template of onboardingTemplates) {
+        if (next[template.courseKey] === undefined) {
+          next[template.courseKey] = template.bodyHtml;
+        }
+      }
+      return next;
+    });
+  }, [onboardingTemplates]);
 
   React.useEffect(() => {
     if (!adminCounselorId && counselors.length > 0) {
@@ -358,6 +393,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleSaveTemplate = async () => {
+    const subjectTemplate = templateSubjectDraft.trim();
+    const bodyHtml = templateBodyDraft.trim();
+
+    if (!subjectTemplate || !bodyHtml) {
+      alert('Template subject and body are required.');
+      return;
+    }
+
+    try {
+      setTemplateSavingCourse(selectedTemplateCourse);
+      const updated = await db.updateOnboardingTemplate(selectedTemplateCourse, subjectTemplate, bodyHtml);
+      setTemplateSubjectDrafts(current => ({ ...current, [selectedTemplateCourse]: updated.subjectTemplate }));
+      setTemplateBodyDrafts(current => ({ ...current, [selectedTemplateCourse]: updated.bodyHtml }));
+      await onDataChange();
+      alert('Template saved.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to save template.');
+    } finally {
+      setTemplateSavingCourse(null);
+    }
+  };
+
+  const handleResetTemplateDraft = () => {
+    setTemplateSubjectDrafts(current => ({
+      ...current,
+      [selectedTemplateCourse]: selectedTemplate?.subjectTemplate || ''
+    }));
+    setTemplateBodyDrafts(current => ({
+      ...current,
+      [selectedTemplateCourse]: selectedTemplate?.bodyHtml || ''
+    }));
+  };
+
   const handleToggleLinkGeneration = async (counselor: Counselor) => {
     const isBlocked = Boolean(counselor.linkGenerationBlocked);
     let note: string | null = null;
@@ -427,7 +496,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const canSendOnboardingEmail = (registration: StudentRegistration) =>
     registration.status === 'verified'
-    && registration.courseKey !== 'DAS'
+    && Boolean(getTemplate(registration.courseKey))
     && registration.onboardingEmailStatus !== 'sent'
     && !registration.onboardingEmailSentAt;
 
@@ -443,14 +512,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleSendOnboardingEmail = async (registration: StudentRegistration) => {
+  const handleSendOnboardingEmail = async (registration: StudentRegistration, editedEmail?: { subject: string; html: string }) => {
     if (!confirm(`Send onboarding email to ${registration.name}?`)) {
       return;
     }
 
     try {
       setSendingEmailId(registration.id);
-      const updated = await db.sendOnboardingEmail(registration.id, session.email);
+      const updated = await db.sendOnboardingEmail(registration.id, session.email, editedEmail?.subject, editedEmail?.html);
       if (selectedReg?.id === registration.id) {
         setSelectedReg(updated);
       }
@@ -680,6 +749,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Counselor Accounts</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('templates')}
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'templates'
+                ? 'bg-[#485d8b] text-white shadow-md'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Templates</span>
           </button>
         </div>
 
@@ -1244,7 +1325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
           </div>
-        ) : (
+        ) : activeTab === 'counselors' ? (
           /* COUNSELORS TAB */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Create Counselor Form */}
@@ -1489,6 +1570,146 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     No counselor accounts registered yet.
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* TEMPLATES TAB */
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-900">
+                <FileText className="h-5 w-5 text-[#485d8b]" />
+                <span>Course Templates</span>
+              </h3>
+              <div className="mt-4 space-y-2">
+                {(Object.keys(COURSES) as CourseKey[]).map(courseKey => {
+                  const hasTemplate = Boolean(getTemplate(courseKey));
+                  return (
+                    <button
+                      key={courseKey}
+                      type="button"
+                      onClick={() => setSelectedTemplateCourse(courseKey)}
+                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm font-semibold transition-all ${
+                        selectedTemplateCourse === courseKey
+                          ? 'border-[#485d8b] bg-[#485d8b] text-white shadow-sm'
+                          : 'border-gray-200 bg-white text-gray-700 hover:border-[#485d8b] hover:text-[#485d8b]'
+                      }`}
+                    >
+                      <span>{courseKey}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${
+                        selectedTemplateCourse === courseKey
+                          ? 'bg-white/15 text-white'
+                          : hasTemplate
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {hasTemplate ? 'Ready' : 'No template'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-gray-200 bg-gray-50/60 p-5 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Mail Template</p>
+                  <h3 className="mt-1 text-xl font-black text-gray-900">{selectedTemplateCourse}</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Changes here update the master template. Editing inside mail preview before Send will affect only that one email.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetTemplateDraft}
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-600 shadow-sm transition-colors hover:bg-gray-100"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveTemplate}
+                    disabled={templateSavingCourse === selectedTemplateCourse}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#485d8b] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#3c4d73] disabled:opacity-60"
+                  >
+                    <Save className="h-4 w-4" />
+                    <span>{templateSavingCourse === selectedTemplateCourse ? 'Saving...' : 'Save Template'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-5 p-5">
+                {!selectedTemplate && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-800">
+                    No saved template exists for {selectedTemplateCourse}. Add subject and body below, then save it to enable onboarding mail for this course.
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Subject Template
+                  </label>
+                  <input
+                    type="text"
+                    value={templateSubjectDraft}
+                    onChange={(event) => setTemplateSubjectDrafts(current => ({
+                      ...current,
+                      [selectedTemplateCourse]: event.target.value
+                    }))}
+                    placeholder="Welcome to DV Data & Analytics - {{courseKey}} Batch {{batchCode}}"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Email Body HTML
+                  </label>
+                  <textarea
+                    rows={18}
+                    value={templateBodyDraft}
+                    onChange={(event) => setTemplateBodyDrafts(current => ({
+                      ...current,
+                      [selectedTemplateCourse]: event.target.value
+                    }))}
+                    placeholder="<p>Dear {{studentName}},</p>"
+                    className="min-h-[420px] w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                  />
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Available Placeholders</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {[
+                      'studentName',
+                      'courseKey',
+                      'courseName',
+                      'courseFullName',
+                      'batchCode',
+                      'batchDate',
+                      'baseFee',
+                      'discount',
+                      'finalPayable',
+                      'registrationAmount',
+                      'remainingBalance',
+                      'paymentProceedingType',
+                      'courseFeeLine',
+                      'paymentSchedule'
+                    ].map(placeholder => (
+                      <button
+                        key={placeholder}
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(`{{${placeholder}}}`)}
+                        className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-gray-600 transition-colors hover:border-[#485d8b] hover:text-[#485d8b]"
+                        title="Copy placeholder"
+                      >
+                        {`{{${placeholder}}}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1820,15 +2041,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {emailPreview.cc.length > 0 && (
                 <div><span className="font-semibold text-gray-500">CC:</span> <span className="text-gray-900">{emailPreview.cc.join(', ')}</span></div>
               )}
-              <div><span className="font-semibold text-gray-500">Subject:</span> <span className="text-gray-900">{emailPreview.subject}</span></div>
               <div><span className="font-semibold text-gray-500">Attachment:</span> <span className="text-gray-900">DV Admission and Consent Form.pdf</span></div>
             </div>
 
-            <div className="flex-1 overflow-auto bg-white p-5">
-              <div
-                className="prose max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm"
-                dangerouslySetInnerHTML={{ __html: emailPreview.html }}
-              />
+            <div className="grid flex-1 gap-4 overflow-auto bg-white p-5 lg:grid-cols-2">
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Subject
+                  </label>
+                  <input
+                    type="text"
+                    value={emailPreview.subject}
+                    onChange={(event) => setEmailPreview(current => current ? { ...current, subject: event.target.value } : current)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Email HTML
+                  </label>
+                  <textarea
+                    rows={18}
+                    value={emailPreview.html}
+                    onChange={(event) => setEmailPreview(current => current ? { ...current, html: event.target.value } : current)}
+                    className="min-h-[420px] w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-500">Preview</p>
+                <div
+                  className="prose max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm"
+                  dangerouslySetInnerHTML={{ __html: emailPreview.html }}
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 p-5">
@@ -1841,7 +2088,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => handleSendOnboardingEmail(emailPreview.registration)}
+                onClick={() => handleSendOnboardingEmail(emailPreview.registration, {
+                  subject: emailPreview.subject,
+                  html: emailPreview.html
+                })}
                 disabled={sendingEmailId === emailPreview.registration.id}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-green-100 transition-colors hover:bg-green-700 disabled:opacity-60"
               >

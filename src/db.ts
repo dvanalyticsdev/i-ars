@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppSettings, Counselor, CourseKey, OnboardingEmailPreview, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
+import { AppSettings, Counselor, CourseKey, OnboardingEmailPreview, OnboardingTemplate, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
 
 interface AppState {
   settings: AppSettings;
   counselors: Counselor[];
   registrations: StudentRegistration[];
+  onboardingTemplates: OnboardingTemplate[];
 }
 
 const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
@@ -81,6 +82,12 @@ export const db = {
       body: JSON.stringify({ name, email })
     }),
 
+  updateOnboardingTemplate: (courseKey: CourseKey, subjectTemplate: string, bodyHtml: string) =>
+    apiRequest<OnboardingTemplate>(`/api/onboarding-templates/${encodeURIComponent(courseKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ subjectTemplate, bodyHtml })
+    }),
+
   deleteUnusedRegistration: (id: string) =>
     apiRequest<{ ok: true }>(`/api/registrations/${encodeURIComponent(id)}`, {
       method: 'DELETE'
@@ -143,10 +150,10 @@ export const db = {
   previewOnboardingEmail: (id: string) =>
     apiRequest<OnboardingEmailPreview>(`/api/registrations/${encodeURIComponent(id)}/onboarding-email`),
 
-  sendOnboardingEmail: (id: string, adminEmail: string) =>
+  sendOnboardingEmail: (id: string, adminEmail: string, subject?: string, html?: string) =>
     apiRequest<StudentRegistration>(`/api/registrations/${encodeURIComponent(id)}/onboarding-email/send`, {
       method: 'POST',
-      body: JSON.stringify({ adminEmail })
+      body: JSON.stringify({ adminEmail, subject, html })
     }),
 
   markRegistrationDropout: (id: string, adminEmail: string) =>
@@ -166,6 +173,7 @@ export const useLiveDB = () => {
   const [settings, setSettings] = useState<AppSettings>({ tokenAmount: 5000, updatedAt: new Date().toISOString() });
   const [counselors, setCounselors] = useState<Counselor[]>([]);
   const [registrations, setRegistrations] = useState<StudentRegistration[]>([]);
+  const [onboardingTemplates, setOnboardingTemplates] = useState<OnboardingTemplate[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -174,6 +182,7 @@ export const useLiveDB = () => {
       setSettings(state.settings);
       setCounselors(state.counselors);
       setRegistrations(state.registrations);
+      setOnboardingTemplates(state.onboardingTemplates || []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load application data.');
@@ -190,6 +199,7 @@ export const useLiveDB = () => {
     settings,
     counselors,
     registrations,
+    onboardingTemplates,
     reload,
     error
   };

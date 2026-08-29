@@ -9,7 +9,7 @@ import { AdmissionTracker } from './components/AdmissionTracker';
 import { Database, Code, ChevronUp, ChevronDown } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const { settings, counselors, registrations, reload, error } = useLiveDB();
+  const { settings, counselors, registrations, onboardingTemplates, reload, error } = useLiveDB();
   const [session, setSession] = useState<UserSession | null>(null);
   const [studentId, setStudentId] = useState<string | null>(null);
   const isTrackerPage = window.location.pathname === '/tracker';
@@ -148,6 +148,7 @@ export const App: React.FC = () => {
           settings={settings}
           counselors={counselors} 
           registrations={registrations}
+          onboardingTemplates={onboardingTemplates}
           onDataChange={reload}
         />
       );

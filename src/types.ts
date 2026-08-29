@@ -37,6 +37,14 @@ export interface AppSettings {
   updatedAt: string;
 }
 
+export interface OnboardingTemplate {
+  courseKey: CourseKey;
+  subjectTemplate: string;
+  bodyHtml: string;
+  createdAt?: string;
+  updatedAt: string;
+}
+
 export interface StudentRegistration {
   id: string;
   name: string;

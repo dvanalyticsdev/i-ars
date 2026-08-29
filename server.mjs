@@ -100,7 +100,6 @@ const COURSES = {
 };
 const POST_REGISTRATION_PAYMENT_TYPES = ['Loan', 'Internal EMI', 'Will decide later'];
 const defaultPostRegistrationPaymentType = 'Will decide later';
-const ONBOARDING_COURSES = new Set(['APIDA', 'APIDS', 'FDE']);
 const microsoftMailTokenKey = 'microsoft-mail-token';
 const microsoftAuthStateKey = 'microsoft-mail-auth-state';
 const graphScopes = ['offline_access', 'Mail.Send', 'User.Read'];
@@ -157,6 +156,88 @@ const courseMailConfig = {
   }
 };
 
+const defaultOnboardingTemplateForCourse = courseKey => {
+  const config = courseMailConfig[courseKey];
+  if (!config) return null;
+
+  return {
+    courseKey,
+    subjectTemplate: 'Welcome to DV Data & Analytics - {{courseKey}} Batch {{batchCode}}',
+    bodyHtml: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.55; font-size: 15px;">
+        <p><strong>Dear {{studentName}},</strong></p>
+        <p>Welcome to <strong>DV Data & Analytics</strong>! We are thrilled to have you join India's pioneering career-based industrial Data Science training program. On behalf of the entire DV team, we extend a warm welcome to <strong>${escapeHtml(config.welcomeName('{{batchCode}}'))}</strong>.</p>
+        <p>You are about to embark on an exciting learning journey that will elevate your skills and expertise in Data Science. Our <strong>Training & Development team</strong> is dedicated to ensuring a seamless and enriching learning experience for you.</p>
+
+        <h3>Onboarding Details</h3>
+        <h4>1. Required Documents</h4>
+        <p><strong>Attached:</strong> Consent Form</p>
+        <p><strong>Action Required:</strong> Kindly sign and submit the form within <strong>2 days</strong> from the date of this email to receive access to our <strong>Learning Management System (LMS)</strong>.</p>
+
+        <h4>2. LMS Access Information</h4>
+        <p>Upon enrollment, you will gain access to:</p>
+        <ul>
+          <li><strong>Video Dashboard</strong> - ${escapeHtml(config.videoDashboard)}</li>
+          <li><strong>Study Materials</strong> - Comprehensive learning resources.</li>
+          <li><strong>Student Mentorship</strong> - Personalized guidance from industry experts.</li>
+          <li><strong>WhatsApp Support Group</strong> - Access provided one day before program commencement.</li>
+        </ul>
+        <p><strong>LMS Access Duration:</strong></p>
+        <ul>
+          <li><strong>Batch-wise access:</strong> 12 months from the date of enrollment.</li>
+          <li><strong>Self-paced review access:</strong> Additional 12 months after batch completion.</li>
+        </ul>
+        <p><strong>To activate LMS access:</strong></p>
+        <ol>
+          <li>Log in to the DV Analytics Registration Portal.</li>
+          <li>Complete the admission process.</li>
+          <li>Approve the Consent Form.</li>
+        </ol>
+
+        <h4>3. System Requirements</h4>
+        <p>For an optimal learning experience, ensure your system meets the following specifications:</p>
+        <ul>
+          <li><strong>Operating System:</strong> Windows 10 or above</li>
+          <li><strong>Processor:</strong> Intel i3 or higher</li>
+          <li><strong>RAM:</strong> ${escapeHtml(config.ram)}</li>
+          <li><strong>Storage:</strong> 512GB SSD/HDD or higher</li>
+        </ul>
+
+        <h4>4. Course Fees & Payment Schedule</h4>
+        <p>{{courseFeeLine}}</p>
+        {{paymentSchedule}}
+
+        <p><strong>Bank Details for Fee Payment:</strong></p>
+        <ul>
+          <li><strong>Account Name:</strong> DV DATA & ANALYTICS Pvt Ltd.</li>
+          <li><strong>Account Type:</strong> Current</li>
+          <li><strong>Account Number:</strong> 343505001332</li>
+          <li><strong>Bank:</strong> ICICI</li>
+          <li><strong>Branch:</strong> Mallesh Palya Main Road</li>
+          <li><strong>IFSC Code:</strong> ICIC0003435</li>
+        </ul>
+        <p><strong>Payment Link:</strong> <a href="https://dvanalyticsmds.com/payment">https://dvanalyticsmds.com/payment</a></p>
+
+        <h4>5. Contact Information</h4>
+        <p>For any assistance or inquiries, please reach out to the respective support teams:</p>
+        <ul>
+          <li><strong>Finance & LMS Access:</strong> Mr. Sajid - 8431424165</li>
+          <li><strong>Student Mentorship:</strong> Mrs. Lakshmi - 7907991738</li>
+          <li><strong>Escalations:</strong> Mr. Ajith - 9916000655</li>
+          <li><strong>Class Schedules:</strong> Ms. Sanjana - 9611276828</li>
+        </ul>
+
+        <p>If you have any questions or require further assistance, please do not hesitate to contact us. We are excited to support you on your journey to becoming a <strong>Data Science & AI expert</strong>!</p>
+        <p><strong>Best Regards,</strong><br/>DV Data & Analytics Team</p>
+        <p><strong>Email:</strong> support@dvdataanalytics.com | md.sajid@dvdataanalytics.com<br/>
+        <strong>Contact:</strong> +91 8431424165 | 9611276828<br/>
+        <strong>Website:</strong> <a href="https://www.dvanalyticsmds.com">www.dvanalyticsmds.com</a></p>
+      </div>
+    `.trim(),
+    updatedAt: new Date().toISOString()
+  };
+};
+
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -173,11 +254,13 @@ const database = client.db(mongoDbName);
 const settingsCollection = database.collection('settings');
 const counselorsCollection = database.collection('counselors');
 const registrationsCollection = database.collection('registrations');
+const onboardingTemplatesCollection = database.collection('onboardingTemplates');
 await settingsCollection.createIndex({ key: 1 }, { unique: true });
 await counselorsCollection.createIndex({ email: 1 }, { unique: true });
 await registrationsCollection.createIndex({ id: 1 }, { unique: true });
 await registrationsCollection.createIndex({ generatedByCounselorId: 1 });
 await registrationsCollection.createIndex({ status: 1 });
+await onboardingTemplatesCollection.createIndex({ courseKey: 1 }, { unique: true });
 
 const ensureSeedData = async () => {
   await settingsCollection.updateOne(
@@ -214,6 +297,15 @@ const ensureSeedData = async () => {
     { postRegistrationPaymentType: { $exists: false } },
     { $set: { postRegistrationPaymentType: defaultPostRegistrationPaymentType } }
   );
+
+  for (const courseKey of Object.keys(courseMailConfig)) {
+    const template = defaultOnboardingTemplateForCourse(courseKey);
+    await onboardingTemplatesCollection.updateOne(
+      { courseKey },
+      { $setOnInsert: { ...template, createdAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+  }
 };
 
 await ensureSeedData();
@@ -240,7 +332,8 @@ const normalizeRegistration = registration => ({
 const getAppState = async () => ({
   settings: await getSettings(),
   counselors: (await counselorsCollection.find({}, { projection: { _id: 0, passwordHash: 0, passwordSalt: 0 } }).sort({ createdAt: 1 }).toArray()),
-  registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray()).map(normalizeRegistration)
+  registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray()).map(normalizeRegistration),
+  onboardingTemplates: await onboardingTemplatesCollection.find({}, { projection: { _id: 0 } }).sort({ courseKey: 1 }).toArray()
 });
 
 const microsoftConfig = () => {
@@ -385,102 +478,64 @@ const buildPaymentScheduleHtml = registration => {
   `;
 };
 
-const buildOnboardingEmail = registration => {
-  const config = courseMailConfig[registration.courseKey];
-  const batch = batchCode(registration.batchDate);
+const templateValuesForRegistration = registration => {
   const discountSentence = Number(registration.discount || 0) > 0
     ? ` and you have received a discount of ${formatRs(registration.discount)}`
     : '';
+  const courseConfig = courseMailConfig[registration.courseKey];
+  const courseFullName = courseConfig?.fullName || registration.courseName || registration.courseKey;
+  const remainingBalance = Math.max(0, Number(registration.finalPayable || 0) - Number(registration.minTokenFee || 0));
 
   return {
-    subject: `Welcome to DV Data & Analytics - ${registration.courseKey} Batch ${batch}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.55; font-size: 15px;">
-        <p><strong>Dear ${escapeHtml(registration.name)},</strong></p>
-        <p>Welcome to <strong>DV Data & Analytics</strong>! We are thrilled to have you join India's pioneering career-based industrial Data Science training program. On behalf of the entire DV team, we extend a warm welcome to <strong>${escapeHtml(config.welcomeName(batch))}</strong>.</p>
-        <p>You are about to embark on an exciting learning journey that will elevate your skills and expertise in Data Science. Our <strong>Training & Development team</strong> is dedicated to ensuring a seamless and enriching learning experience for you.</p>
-
-        <h3>Onboarding Details</h3>
-        <h4>1. Required Documents</h4>
-        <p><strong>Attached:</strong> Consent Form</p>
-        <p><strong>Action Required:</strong> Kindly sign and submit the form within <strong>2 days</strong> from the date of this email to receive access to our <strong>Learning Management System (LMS)</strong>.</p>
-
-        <h4>2. LMS Access Information</h4>
-        <p>Upon enrollment, you will gain access to:</p>
-        <ul>
-          <li><strong>Video Dashboard</strong> - ${escapeHtml(config.videoDashboard)}</li>
-          <li><strong>Study Materials</strong> - Comprehensive learning resources.</li>
-          <li><strong>Student Mentorship</strong> - Personalized guidance from industry experts.</li>
-          <li><strong>WhatsApp Support Group</strong> - Access provided one day before program commencement.</li>
-        </ul>
-        <p><strong>LMS Access Duration:</strong></p>
-        <ul>
-          <li><strong>Batch-wise access:</strong> 12 months from the date of enrollment.</li>
-          <li><strong>Self-paced review access:</strong> Additional 12 months after batch completion.</li>
-        </ul>
-        <p><strong>To activate LMS access:</strong></p>
-        <ol>
-          <li>Log in to the DV Analytics Registration Portal.</li>
-          <li>Complete the admission process.</li>
-          <li>Approve the Consent Form.</li>
-        </ol>
-
-        <h4>3. System Requirements</h4>
-        <p>For an optimal learning experience, ensure your system meets the following specifications:</p>
-        <ul>
-          <li><strong>Operating System:</strong> Windows 10 or above</li>
-          <li><strong>Processor:</strong> Intel i3 or higher</li>
-          <li><strong>RAM:</strong> ${escapeHtml(config.ram)}</li>
-          <li><strong>Storage:</strong> 512GB SSD/HDD or higher</li>
-        </ul>
-
-        <h4>4. Course Fees & Payment Schedule</h4>
-        <p>The total fee for the <strong>${escapeHtml(config.fullName)}</strong> is <strong>${formatRs(registration.baseFee)}</strong>${discountSentence}. The final committed fees that you need to pay is <strong>${formatRs(registration.finalPayable)}</strong>.</p>
-        ${buildPaymentScheduleHtml(registration)}
-
-        <p><strong>Bank Details for Fee Payment:</strong></p>
-        <ul>
-          <li><strong>Account Name:</strong> DV DATA & ANALYTICS Pvt Ltd.</li>
-          <li><strong>Account Type:</strong> Current</li>
-          <li><strong>Account Number:</strong> 343505001332</li>
-          <li><strong>Bank:</strong> ICICI</li>
-          <li><strong>Branch:</strong> Mallesh Palya Main Road</li>
-          <li><strong>IFSC Code:</strong> ICIC0003435</li>
-        </ul>
-        <p><strong>Payment Link:</strong> <a href="https://dvanalyticsmds.com/payment">https://dvanalyticsmds.com/payment</a></p>
-
-        <h4>5. Contact Information</h4>
-        <p>For any assistance or inquiries, please reach out to the respective support teams:</p>
-        <ul>
-          <li><strong>Finance & LMS Access:</strong> Mr. Sajid - 8431424165</li>
-          <li><strong>Student Mentorship:</strong> Mrs. Lakshmi - 7907991738</li>
-          <li><strong>Escalations:</strong> Mr. Ajith - 9916000655</li>
-          <li><strong>Class Schedules:</strong> Ms. Sanjana - 9611276828</li>
-        </ul>
-
-        <p>If you have any questions or require further assistance, please do not hesitate to contact us. We are excited to support you on your journey to becoming a <strong>Data Science & AI expert</strong>!</p>
-        <p><strong>Best Regards,</strong><br/>DV Data & Analytics Team</p>
-        <p><strong>Email:</strong> support@dvdataanalytics.com | md.sajid@dvdataanalytics.com<br/>
-        <strong>Contact:</strong> +91 8431424165 | 9611276828<br/>
-        <strong>Website:</strong> <a href="https://www.dvanalyticsmds.com">www.dvanalyticsmds.com</a></p>
-      </div>
-    `
+    studentName: escapeHtml(registration.name),
+    courseKey: escapeHtml(registration.courseKey),
+    courseName: escapeHtml(registration.courseName || registration.courseKey),
+    courseFullName: escapeHtml(courseFullName),
+    batchCode: escapeHtml(batchCode(registration.batchDate)),
+    batchDate: escapeHtml(formatMailDate(registration.batchDate)),
+    baseFee: escapeHtml(formatRs(registration.baseFee)),
+    discount: escapeHtml(formatRs(registration.discount)),
+    finalPayable: escapeHtml(formatRs(registration.finalPayable)),
+    registrationAmount: escapeHtml(formatRs(registration.minTokenFee)),
+    remainingBalance: escapeHtml(formatRs(remainingBalance)),
+    paymentProceedingType: escapeHtml(registration.postRegistrationPaymentType || defaultPostRegistrationPaymentType),
+    courseFeeLine: `The total fee for the <strong>${escapeHtml(courseFullName)}</strong> is <strong>${formatRs(registration.baseFee)}</strong>${discountSentence}. The final committed fees that you need to pay is <strong>${formatRs(registration.finalPayable)}</strong>.`,
+    paymentSchedule: buildPaymentScheduleHtml(registration)
   };
 };
 
-const sendOnboardingEmail = async registration => {
-  const normalized = normalizeRegistration(registration);
+const renderOnboardingTemplate = (template, registration) => {
+  const values = templateValuesForRegistration(registration);
+  const render = value => String(value || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => values[key] ?? '');
 
-  if (!ONBOARDING_COURSES.has(normalized.courseKey)) {
-    return { status: 'skipped', error: 'Onboarding email is not configured for this course.' };
+  return {
+    subject: render(template.subjectTemplate),
+    html: render(template.bodyHtml)
+  };
+};
+
+const getOnboardingTemplate = async courseKey => {
+  const template = await onboardingTemplatesCollection.findOne({ courseKey }, { projection: { _id: 0 } });
+  if (!template?.subjectTemplate || !template?.bodyHtml) {
+    throw new Error('Onboarding email is not configured for this course.');
   }
+  return template;
+};
+
+const buildOnboardingEmail = async registration => {
+  const template = await getOnboardingTemplate(registration.courseKey);
+  return renderOnboardingTemplate(template, registration);
+};
+
+const sendOnboardingEmail = async (registration, emailOverride = null) => {
+  const normalized = normalizeRegistration(registration);
 
   if (normalized.onboardingEmailStatus === 'sent' || normalized.onboardingEmailSentAt) {
     return { status: 'sent', sentAt: normalized.onboardingEmailSentAt };
   }
 
   const accessToken = await getMicrosoftAccessToken();
-  const email = buildOnboardingEmail(normalized);
+  const email = emailOverride || await buildOnboardingEmail(normalized);
   const consentForm = await readFile(consentFormPath);
   const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
     method: 'POST',
@@ -522,12 +577,7 @@ const sendOnboardingEmail = async registration => {
 
 const onboardingEmailPreview = async registration => {
   const normalized = normalizeRegistration(registration);
-
-  if (!ONBOARDING_COURSES.has(normalized.courseKey)) {
-    throw new Error('Onboarding email is not configured for this course.');
-  }
-
-  const email = buildOnboardingEmail(normalized);
+  const email = await buildOnboardingEmail(normalized);
   const ccRecipients = await onboardingCcRecipients(normalized);
 
   return {
@@ -706,6 +756,7 @@ const handleApi = async (request, response, url) => {
   if (request.method === 'POST' && url.pathname === '/api/reset') {
     await registrationsCollection.deleteMany({});
     await counselorsCollection.deleteMany({});
+    await onboardingTemplatesCollection.deleteMany({});
     await counselorsCollection.insertMany(DEFAULT_COUNSELORS);
     return json(response, 200, await getAppState());
   }
@@ -864,6 +915,35 @@ const handleApi = async (request, response, url) => {
     };
     await counselorsCollection.updateOne({ id }, { $set: update });
     return json(response, 200, { ...sanitize(counselor), ...update });
+  }
+
+  const onboardingTemplateMatch = url.pathname.match(/^\/api\/onboarding-templates\/([^/]+)$/);
+  if (request.method === 'PUT' && onboardingTemplateMatch) {
+    const courseKey = decodeURIComponent(onboardingTemplateMatch[1]).toUpperCase();
+    const body = await readJsonBody(request);
+    const subjectTemplate = String(body.subjectTemplate || '').trim();
+    const bodyHtml = String(body.bodyHtml || '').trim();
+
+    if (!COURSES[courseKey]) {
+      return json(response, 400, { message: 'Please select a valid course.' });
+    }
+
+    if (!subjectTemplate || !bodyHtml) {
+      return json(response, 400, { message: 'Subject and email template are required.' });
+    }
+
+    const updatedAt = new Date().toISOString();
+    await onboardingTemplatesCollection.updateOne(
+      { courseKey },
+      {
+        $set: { courseKey, subjectTemplate, bodyHtml, updatedAt },
+        $setOnInsert: { createdAt: updatedAt }
+      },
+      { upsert: true }
+    );
+
+    const template = await onboardingTemplatesCollection.findOne({ courseKey }, { projection: { _id: 0 } });
+    return json(response, 200, template);
   }
 
   if (request.method === 'POST' && url.pathname === '/api/registrations') {
@@ -1135,9 +1215,14 @@ const handleApi = async (request, response, url) => {
       return json(response, 400, { message: 'Onboarding email has already been sent for this registration.' });
     }
 
+    const subject = String(body.subject || '').trim();
+    const editedHtml = String(body.html || '').trim();
     const attemptedAt = new Date().toISOString();
     try {
-      const emailResult = await sendOnboardingEmail(normalized);
+      const emailResult = await sendOnboardingEmail(
+        normalized,
+        subject && editedHtml ? { subject, html: editedHtml } : null
+      );
       const emailUpdate = {
         onboardingEmailStatus: emailResult.status,
         onboardingEmailAttemptedAt: attemptedAt,
