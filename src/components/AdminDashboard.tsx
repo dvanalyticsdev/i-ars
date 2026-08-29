@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { db } from '../db';
-import { AppSettings, Counselor, DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, UserSession, COURSES, CourseKey, OnboardingTemplate } from '../types';
+import { AppSettings, Counselor, DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, UserSession, COURSES, CourseKey, OnboardingAttachment, OnboardingTemplate } from '../types';
 import { 
   Users, 
   FileCheck, 
@@ -25,7 +25,9 @@ import {
   Send,
   Pencil,
   FileText,
-  Menu
+  Menu,
+  Paperclip,
+  Upload
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
 import { formatCourseLabel, formatCurrency } from '../format';
@@ -150,12 +152,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     cc: string[];
     subject: string;
     html: string;
+    attachments?: OnboardingAttachment[];
   } | null>(null);
   const [emailPreviewLoadingId, setEmailPreviewLoadingId] = useState<string | null>(null);
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
   const [selectedTemplateCourse, setSelectedTemplateCourse] = useState<CourseKey>('APIDS');
   const [templateSubjectDrafts, setTemplateSubjectDrafts] = useState<Record<string, string>>({});
   const [templateBodyDrafts, setTemplateBodyDrafts] = useState<Record<string, string>>({});
+  const [templateAttachmentDrafts, setTemplateAttachmentDrafts] = useState<Record<string, OnboardingAttachment[]>>({});
+  const [templateAttachmentUploading, setTemplateAttachmentUploading] = useState(false);
   const [templateSavingCourse, setTemplateSavingCourse] = useState<string | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
@@ -165,6 +170,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const selectedTemplate = getTemplate(selectedTemplateCourse);
   const templateSubjectDraft = templateSubjectDrafts[selectedTemplateCourse] ?? selectedTemplate?.subjectTemplate ?? '';
   const templateBodyDraft = templateBodyDrafts[selectedTemplateCourse] ?? selectedTemplate?.bodyHtml ?? '';
+  const templateAttachmentDraft = templateAttachmentDrafts[selectedTemplateCourse] ?? selectedTemplate?.attachments ?? [];
 
   React.useEffect(() => {
     setTokenAmount(settings.tokenAmount);
@@ -193,6 +199,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       for (const template of onboardingTemplates) {
         if (next[template.courseKey] === undefined) {
           next[template.courseKey] = template.bodyHtml;
+        }
+      }
+      return next;
+    });
+    setTemplateAttachmentDrafts(current => {
+      const next = { ...current };
+      for (const template of onboardingTemplates) {
+        if (next[template.courseKey] === undefined) {
+          next[template.courseKey] = template.attachments || [];
         }
       }
       return next;
@@ -456,6 +471,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveTemplate = async () => {
     const subjectTemplate = templateSubjectDraft.trim();
     const bodyHtml = templateBodyDraft.trim();
+    const attachments = templateAttachmentDraft;
 
     if (!subjectTemplate || !bodyHtml) {
       alert('Template subject and body are required.');
@@ -464,9 +480,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     try {
       setTemplateSavingCourse(selectedTemplateCourse);
-      const updated = await db.updateOnboardingTemplate(selectedTemplateCourse, subjectTemplate, bodyHtml);
+      const updated = await db.updateOnboardingTemplate(selectedTemplateCourse, subjectTemplate, bodyHtml, attachments);
       setTemplateSubjectDrafts(current => ({ ...current, [selectedTemplateCourse]: updated.subjectTemplate }));
       setTemplateBodyDrafts(current => ({ ...current, [selectedTemplateCourse]: updated.bodyHtml }));
+      setTemplateAttachmentDrafts(current => ({ ...current, [selectedTemplateCourse]: updated.attachments || [] }));
       await onDataChange();
       alert('Template saved.');
     } catch (error) {
@@ -484,6 +501,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTemplateBodyDrafts(current => ({
       ...current,
       [selectedTemplateCourse]: selectedTemplate?.bodyHtml || ''
+    }));
+    setTemplateAttachmentDrafts(current => ({
+      ...current,
+      [selectedTemplateCourse]: selectedTemplate?.attachments || []
+    }));
+  };
+
+  const handleUploadTemplateAttachment = (file: File | null) => {
+    if (!file) return;
+
+    if (file.size > 5_000_000) {
+      alert('Attachment must be under 5 MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        setTemplateAttachmentUploading(true);
+        const attachment = await db.uploadOnboardingAttachment(
+          file.name,
+          file.type || 'application/octet-stream',
+          String(reader.result || '')
+        );
+        setTemplateAttachmentDrafts(current => ({
+          ...current,
+          [selectedTemplateCourse]: [
+            ...(current[selectedTemplateCourse] ?? selectedTemplate?.attachments ?? []),
+            attachment
+          ]
+        }));
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Unable to upload attachment.');
+      } finally {
+        setTemplateAttachmentUploading(false);
+      }
+    };
+    reader.onerror = () => alert('Unable to read this attachment. Please try again.');
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveTemplateAttachment = (attachmentId: string) => {
+    setTemplateAttachmentDrafts(current => ({
+      ...current,
+      [selectedTemplateCourse]: templateAttachmentDraft.filter(attachment => attachment.id !== attachmentId)
     }));
   };
 
@@ -1758,6 +1820,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                 </div>
 
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Attachments</p>
+                      <p className="mt-1 text-sm text-gray-500">These files will be sent with this course onboarding mail.</p>
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-[#485d8b] hover:text-[#485d8b]">
+                      <Upload className="h-4 w-4" />
+                      <span>{templateAttachmentUploading ? 'Uploading...' : 'Upload File'}</span>
+                      <input
+                        type="file"
+                        className="sr-only"
+                        disabled={templateAttachmentUploading}
+                        onChange={(event) => {
+                          handleUploadTemplateAttachment(event.target.files?.[0] || null);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    {templateAttachmentDraft.length === 0 ? (
+                      <div className="rounded-md border border-dashed border-gray-300 bg-white px-3 py-3 text-sm font-medium text-gray-500">
+                        No attachments selected for this template.
+                      </div>
+                    ) : (
+                      templateAttachmentDraft.map(attachment => (
+                        <div
+                          key={attachment.id}
+                          className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
+                            <span className="truncate text-sm font-semibold text-gray-700">{attachment.name}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTemplateAttachment(attachment.id)}
+                            className="rounded-md border border-red-100 px-2.5 py-1 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
                     Email Body
@@ -2134,7 +2245,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {emailPreview.cc.length > 0 && (
                 <div><span className="font-semibold text-gray-500">CC:</span> <span className="text-gray-900">{emailPreview.cc.join(', ')}</span></div>
               )}
-              <div><span className="font-semibold text-gray-500">Attachment:</span> <span className="text-gray-900">DV Admission and Consent Form.pdf</span></div>
+              <div>
+                <span className="font-semibold text-gray-500">Attachments:</span>{' '}
+                <span className="text-gray-900">
+                  {emailPreview.attachments?.length
+                    ? emailPreview.attachments.map(attachment => attachment.name).join(', ')
+                    : 'No attachments'}
+                </span>
+              </div>
             </div>
 
             <div className="flex-1 space-y-4 overflow-auto bg-white p-5">

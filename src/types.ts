@@ -37,10 +37,18 @@ export interface AppSettings {
   updatedAt: string;
 }
 
+export interface OnboardingAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  path?: string;
+}
+
 export interface OnboardingTemplate {
   courseKey: CourseKey;
   subjectTemplate: string;
   bodyHtml: string;
+  attachments?: OnboardingAttachment[];
   createdAt?: string;
   updatedAt: string;
 }
@@ -93,6 +101,7 @@ export interface OnboardingEmailPreview {
   cc: string[];
   subject: string;
   html: string;
+  attachments?: OnboardingAttachment[];
 }
 
 export interface UserSession {

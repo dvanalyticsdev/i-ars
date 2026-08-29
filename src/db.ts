@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppSettings, Counselor, CourseKey, OnboardingEmailPreview, OnboardingTemplate, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
+import { AppSettings, Counselor, CourseKey, OnboardingAttachment, OnboardingEmailPreview, OnboardingTemplate, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
 
 interface AppState {
   settings: AppSettings;
@@ -82,10 +82,16 @@ export const db = {
       body: JSON.stringify({ name, email })
     }),
 
-  updateOnboardingTemplate: (courseKey: CourseKey, subjectTemplate: string, bodyHtml: string) =>
+  uploadOnboardingAttachment: (name: string, contentType: string, dataUrl: string) =>
+    apiRequest<OnboardingAttachment>('/api/onboarding-attachments', {
+      method: 'POST',
+      body: JSON.stringify({ name, contentType, dataUrl })
+    }),
+
+  updateOnboardingTemplate: (courseKey: CourseKey, subjectTemplate: string, bodyHtml: string, attachments: OnboardingAttachment[]) =>
     apiRequest<OnboardingTemplate>(`/api/onboarding-templates/${encodeURIComponent(courseKey)}`, {
       method: 'PUT',
-      body: JSON.stringify({ subjectTemplate, bodyHtml })
+      body: JSON.stringify({ subjectTemplate, bodyHtml, attachments })
     }),
 
   deleteUnusedRegistration: (id: string) =>

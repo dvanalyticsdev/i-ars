@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { extname, join, normalize } from 'node:path';
@@ -32,7 +32,8 @@ await loadEnvFile();
 
 const distDir = join(__dirname, 'dist');
 const logoDir = join(__dirname, 'Logo');
-const consentFormPath = join(__dirname, 'attachments', 'DV Admission and Consent Form.pdf');
+const attachmentsDir = join(__dirname, 'attachments');
+const uploadedTemplateAttachmentsDir = join(attachmentsDir, 'template-attachments');
 const port = Number(process.env.PORT || 3600);
 const defaultTokenAmount = 5000;
 const apiVersion = '2025-01-01';
@@ -103,6 +104,12 @@ const defaultPostRegistrationPaymentType = 'Will decide later';
 const microsoftMailTokenKey = 'microsoft-mail-token';
 const microsoftAuthStateKey = 'microsoft-mail-auth-state';
 const graphScopes = ['offline_access', 'Mail.Send', 'User.Read'];
+const defaultConsentFormAttachment = {
+  id: 'default-consent-form',
+  name: 'DV Admission and Consent Form.pdf',
+  contentType: 'application/pdf',
+  path: 'DV Admission and Consent Form.pdf'
+};
 
 const escapeHtml = value => String(value || '')
   .replace(/&/g, '&amp;')
@@ -234,6 +241,7 @@ const defaultOnboardingTemplateForCourse = courseKey => {
         <strong>Website:</strong> <a href="https://www.dvanalyticsmds.com">www.dvanalyticsmds.com</a></p>
       </div>
     `.trim(),
+    attachments: [defaultConsentFormAttachment],
     updatedAt: new Date().toISOString()
   };
 };
@@ -246,6 +254,40 @@ const contentTypes = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml'
+};
+
+const safeTemplateAttachments = attachments => {
+  if (!Array.isArray(attachments)) return [];
+
+  return attachments
+    .map(attachment => ({
+      id: String(attachment?.id || '').trim(),
+      name: String(attachment?.name || '').trim(),
+      contentType: String(attachment?.contentType || 'application/octet-stream').trim(),
+      path: String(attachment?.path || '').trim()
+    }))
+    .filter(attachment => {
+      if (!attachment.id || !attachment.name || !attachment.path) return false;
+      const resolved = normalize(join(attachmentsDir, attachment.path));
+      return resolved.startsWith(normalize(attachmentsDir));
+    });
+};
+
+const attachmentFilePath = attachment => {
+  const resolved = normalize(join(attachmentsDir, attachment.path));
+  if (!resolved.startsWith(normalize(attachmentsDir))) {
+    throw new Error(`Attachment path is not allowed: ${attachment.name}`);
+  }
+  return resolved;
+};
+
+const fileExtensionForUpload = (fileName, contentType) => {
+  const fromName = extname(fileName || '').toLowerCase();
+  if (fromName) return fromName;
+  if (contentType === 'application/pdf') return '.pdf';
+  if (contentType === 'image/png') return '.png';
+  if (contentType === 'image/jpeg') return '.jpg';
+  return '.bin';
 };
 
 const client = new MongoClient(mongoUri);
@@ -306,6 +348,17 @@ const ensureSeedData = async () => {
       { upsert: true }
     );
   }
+
+  await onboardingTemplatesCollection.updateMany(
+    {
+      courseKey: { $in: Object.keys(courseMailConfig) },
+      $or: [
+        { attachments: { $exists: false } },
+        { attachments: { $size: 0 } }
+      ]
+    },
+    { $set: { attachments: [defaultConsentFormAttachment] } }
+  );
 };
 
 await ensureSeedData();
@@ -510,7 +563,8 @@ const renderOnboardingTemplate = (template, registration) => {
 
   return {
     subject: render(template.subjectTemplate),
-    html: render(template.bodyHtml)
+    html: render(template.bodyHtml),
+    attachments: safeTemplateAttachments(template.attachments)
   };
 };
 
@@ -535,8 +589,21 @@ const sendOnboardingEmail = async (registration, emailOverride = null) => {
   }
 
   const accessToken = await getMicrosoftAccessToken();
-  const email = emailOverride || await buildOnboardingEmail(normalized);
-  const consentForm = await readFile(consentFormPath);
+  const templateEmail = await buildOnboardingEmail(normalized);
+  const email = emailOverride
+    ? { ...templateEmail, subject: emailOverride.subject, html: emailOverride.html }
+    : templateEmail;
+  const fileAttachments = [];
+  for (const attachment of safeTemplateAttachments(email.attachments)) {
+    const content = await readFile(attachmentFilePath(attachment));
+    fileAttachments.push({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: attachment.name,
+      contentType: attachment.contentType || 'application/octet-stream',
+      contentBytes: content.toString('base64')
+    });
+  }
+
   const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
     method: 'POST',
     headers: {
@@ -554,14 +621,7 @@ const sendOnboardingEmail = async (registration, emailOverride = null) => {
           { emailAddress: { address: normalized.email } }
         ],
         ccRecipients: await onboardingCcRecipients(normalized),
-        attachments: [
-          {
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: 'DV Admission and Consent Form.pdf',
-            contentType: 'application/pdf',
-            contentBytes: consentForm.toString('base64')
-          }
-        ]
+        attachments: fileAttachments
       },
       saveToSentItems: true
     })
@@ -584,7 +644,12 @@ const onboardingEmailPreview = async registration => {
     to: normalized.email,
     cc: ccRecipients.map(recipient => recipient.emailAddress.address),
     subject: email.subject,
-    html: email.html
+    html: email.html,
+    attachments: safeTemplateAttachments(email.attachments).map(attachment => ({
+      id: attachment.id,
+      name: attachment.name,
+      contentType: attachment.contentType
+    }))
   };
 };
 
@@ -626,7 +691,7 @@ const readJsonBody = async request =>
     let body = '';
     request.on('data', chunk => {
       body += chunk;
-      if (body.length > 1_000_000) {
+      if (body.length > 8_000_000) {
         reject(new Error('Request body is too large.'));
         request.destroy();
       }
@@ -923,6 +988,7 @@ const handleApi = async (request, response, url) => {
     const body = await readJsonBody(request);
     const subjectTemplate = String(body.subjectTemplate || '').trim();
     const bodyHtml = String(body.bodyHtml || '').trim();
+    const attachments = safeTemplateAttachments(body.attachments);
 
     if (!COURSES[courseKey]) {
       return json(response, 400, { message: 'Please select a valid course.' });
@@ -936,7 +1002,7 @@ const handleApi = async (request, response, url) => {
     await onboardingTemplatesCollection.updateOne(
       { courseKey },
       {
-        $set: { courseKey, subjectTemplate, bodyHtml, updatedAt },
+        $set: { courseKey, subjectTemplate, bodyHtml, attachments, updatedAt },
         $setOnInsert: { createdAt: updatedAt }
       },
       { upsert: true }
@@ -944,6 +1010,36 @@ const handleApi = async (request, response, url) => {
 
     const template = await onboardingTemplatesCollection.findOne({ courseKey }, { projection: { _id: 0 } });
     return json(response, 200, template);
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/onboarding-attachments') {
+    const body = await readJsonBody(request);
+    const name = String(body.name || '').trim();
+    const contentType = String(body.contentType || 'application/octet-stream').trim();
+    const dataUrl = String(body.dataUrl || '');
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+
+    if (!name || !match) {
+      return json(response, 400, { message: 'Please upload a valid attachment file.' });
+    }
+
+    const content = Buffer.from(match[2], 'base64');
+    if (content.length === 0 || content.length > 5_000_000) {
+      return json(response, 400, { message: 'Attachment must be under 5 MB.' });
+    }
+
+    const safeName = name.replace(/[^\w.\- ()]/g, '').trim() || 'attachment';
+    const id = randomUUID();
+    const fileName = `${id}${fileExtensionForUpload(safeName, contentType || match[1])}`;
+    await mkdir(uploadedTemplateAttachmentsDir, { recursive: true });
+    await writeFile(join(uploadedTemplateAttachmentsDir, fileName), content);
+
+    return json(response, 201, {
+      id,
+      name: safeName,
+      contentType: contentType || match[1],
+      path: `template-attachments/${fileName}`
+    });
   }
 
   if (request.method === 'POST' && url.pathname === '/api/registrations') {
