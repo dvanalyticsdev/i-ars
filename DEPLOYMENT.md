@@ -31,13 +31,15 @@ APP_BASE_URL=https://ars.dvanalyticsmds.in
 PORT=3600
 MONGODB_URI=mongodb://127.0.0.1:27017
 MONGODB_DB_NAME=i-ars
-OUTLOOK_SMTP_USER=your-outlook-email@example.com
-OUTLOOK_SMTP_PASS=your-outlook-app-password
-OUTLOOK_FROM_NAME=DV Data & Analytics
-ONBOARDING_CC=
+MICROSOFT_TENANT_ID=your_azure_tenant_id
+MICROSOFT_CLIENT_ID=your_azure_application_client_id
+MICROSOFT_CLIENT_SECRET=your_azure_client_secret_value
+MICROSOFT_SENDER_EMAIL=pushkar.rai@dvdataanalytics.com
+MICROSOFT_FROM_NAME=DV Data Analytics
+ONBOARDING_CC=md.sajid@dvdataanalytics.com
 ```
 
-Use your real HTTPS domain for `APP_BASE_URL`.
+Use your real HTTPS domain for `APP_BASE_URL`. For onboarding emails, create a Microsoft Entra app registration with delegated `Mail.Send`, add `${APP_BASE_URL}/api/microsoft/callback` as a Web redirect URI, set the Microsoft values above, then open `${APP_BASE_URL}/api/microsoft/auth` once and sign in with the sender mailbox.
 
 ## Start App
 

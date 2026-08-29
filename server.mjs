@@ -5,7 +5,6 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypt
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MongoClient } from 'mongodb';
-import nodemailer from 'nodemailer';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const envPath = join(__dirname, '.env');
@@ -102,6 +101,9 @@ const COURSES = {
 const POST_REGISTRATION_PAYMENT_TYPES = ['Loan', 'Internal EMI', 'Will decide later'];
 const defaultPostRegistrationPaymentType = 'Will decide later';
 const ONBOARDING_COURSES = new Set(['APIDA', 'APIDS', 'FDE']);
+const microsoftMailTokenKey = 'microsoft-mail-token';
+const microsoftAuthStateKey = 'microsoft-mail-auth-state';
+const graphScopes = ['offline_access', 'Mail.Send', 'User.Read'];
 
 const escapeHtml = value => String(value || '')
   .replace(/&/g, '&amp;')
@@ -241,6 +243,116 @@ const getAppState = async () => ({
   registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray()).map(normalizeRegistration)
 });
 
+const microsoftConfig = () => {
+  const tenantId = process.env.MICROSOFT_TENANT_ID;
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  const senderEmail = process.env.MICROSOFT_SENDER_EMAIL;
+  const appBaseUrl = process.env.APP_BASE_URL || `http://localhost:${port}`;
+
+  if (!tenantId || !clientId || !clientSecret || !senderEmail) {
+    throw new Error('Microsoft Graph mail is not configured. Set MICROSOFT_TENANT_ID, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_SENDER_EMAIL.');
+  }
+
+  return {
+    tenantId,
+    clientId,
+    clientSecret,
+    senderEmail,
+    redirectUri: `${appBaseUrl.replace(/\/$/, '')}/api/microsoft/callback`
+  };
+};
+
+const microsoftTokenUrl = tenantId => `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+
+const saveMicrosoftToken = async tokenPayload => {
+  const expiresIn = Number(tokenPayload.expires_in || 3600);
+  const token = {
+    key: microsoftMailTokenKey,
+    accessToken: tokenPayload.access_token,
+    refreshToken: tokenPayload.refresh_token,
+    expiresAt: new Date(Date.now() + Math.max(60, expiresIn - 120) * 1000).toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  await settingsCollection.updateOne(
+    { key: microsoftMailTokenKey },
+    { $set: token },
+    { upsert: true }
+  );
+
+  return token;
+};
+
+const requestMicrosoftToken = async form => {
+  const { tenantId } = microsoftConfig();
+  const response = await fetch(microsoftTokenUrl(tenantId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.error || 'Microsoft token request failed.');
+  }
+
+  return payload;
+};
+
+const exchangeMicrosoftCode = async code => {
+  const config = microsoftConfig();
+  const form = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    code,
+    redirect_uri: config.redirectUri,
+    grant_type: 'authorization_code',
+    scope: graphScopes.join(' ')
+  });
+  return saveMicrosoftToken(await requestMicrosoftToken(form));
+};
+
+const getMicrosoftAccessToken = async () => {
+  const config = microsoftConfig();
+  const saved = await settingsCollection.findOne({ key: microsoftMailTokenKey });
+
+  if (!saved?.refreshToken) {
+    throw new Error('Microsoft mailbox is not connected. Open /api/microsoft/auth and sign in once.');
+  }
+
+  if (saved.accessToken && saved.expiresAt && new Date(saved.expiresAt).getTime() > Date.now()) {
+    return saved.accessToken;
+  }
+
+  const form = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: saved.refreshToken,
+    grant_type: 'refresh_token',
+    scope: graphScopes.join(' ')
+  });
+  const refreshed = await requestMicrosoftToken(form);
+  return (await saveMicrosoftToken({
+    ...refreshed,
+    refresh_token: refreshed.refresh_token || saved.refreshToken
+  })).accessToken;
+};
+
+const onboardingCcRecipients = async registration => {
+  const configuredCc = String(process.env.ONBOARDING_CC || '')
+    .split(',')
+    .map(email => email.trim())
+    .filter(Boolean);
+  const counselor = registration.generatedByCounselorId
+    ? await counselorsCollection.findOne({ id: registration.generatedByCounselorId })
+    : null;
+  const all = [...configuredCc, counselor?.email].filter(Boolean);
+  return Array.from(new Set(all.map(email => email.toLowerCase()))).map(address => ({
+    emailAddress: { address }
+  }));
+};
+
 const buildPaymentScheduleHtml = registration => {
   const proceedingType = registration.postRegistrationPaymentType || defaultPostRegistrationPaymentType;
   const balance = Math.max(0, Number(registration.finalPayable || 0) - Number(registration.minTokenFee || 0));
@@ -367,35 +479,43 @@ const sendOnboardingEmail = async registration => {
     return { status: 'sent', sentAt: normalized.onboardingEmailSentAt };
   }
 
-  const user = process.env.OUTLOOK_SMTP_USER;
-  const pass = process.env.OUTLOOK_SMTP_PASS;
-  if (!user || !pass) {
-    throw new Error('Outlook SMTP is not configured. Set OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASS.');
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: process.env.OUTLOOK_SMTP_HOST || 'smtp.office365.com',
-    port: Number(process.env.OUTLOOK_SMTP_PORT || 587),
-    secure: false,
-    auth: { user, pass },
-    tls: { ciphers: 'TLSv1.2' }
-  });
-
+  const accessToken = await getMicrosoftAccessToken();
   const email = buildOnboardingEmail(normalized);
-  const fromName = process.env.OUTLOOK_FROM_NAME || 'DV Data & Analytics';
-  await transporter.sendMail({
-    from: `"${fromName}" <${user}>`,
-    to: normalized.email,
-    cc: process.env.ONBOARDING_CC || undefined,
-    subject: email.subject,
-    html: email.html,
-    attachments: [
-      {
-        filename: 'DV Admission and Consent Form.pdf',
-        path: consentFormPath
-      }
-    ]
+  const consentForm = await readFile(consentFormPath);
+  const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      message: {
+        subject: email.subject,
+        body: {
+          contentType: 'HTML',
+          content: email.html
+        },
+        toRecipients: [
+          { emailAddress: { address: normalized.email } }
+        ],
+        ccRecipients: await onboardingCcRecipients(normalized),
+        attachments: [
+          {
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: 'DV Admission and Consent Form.pdf',
+            contentType: 'application/pdf',
+            contentBytes: consentForm.toString('base64')
+          }
+        ]
+      },
+      saveToSentItems: true
+    })
   });
+
+  if (!graphResponse.ok) {
+    const payload = await graphResponse.json().catch(() => null);
+    throw new Error(payload?.error?.message || 'Microsoft Graph could not send onboarding email.');
+  }
 
   return { status: 'sent', sentAt: new Date().toISOString() };
 };
@@ -404,6 +524,34 @@ const json = (response, statusCode, payload) => {
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
 };
+
+const html = (response, statusCode, markup) => {
+  response.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
+  response.end(markup);
+};
+
+const microsoftConnectionPage = (title, message) => `
+  <!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: Arial, sans-serif; background: #f8fafc; color: #111827; }
+        main { width: min(560px, calc(100% - 32px)); border: 1px solid #dfe5ef; border-radius: 8px; background: #fff; padding: 28px; box-shadow: 0 10px 30px rgba(15, 23, 42, .08); }
+        h1 { margin: 0 0 12px; font-size: 24px; }
+        p { margin: 0; color: #475569; line-height: 1.55; }
+      </style>
+    </head>
+    <body>
+      <main>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(message)}</p>
+      </main>
+    </body>
+  </html>
+`;
 
 const readJsonBody = async request =>
   new Promise((resolve, reject) => {
@@ -450,6 +598,59 @@ const handleApi = async (request, response, url) => {
   if (request.method === 'GET' && url.pathname === '/api/state') {
     await ensureSeedData();
     return json(response, 200, await getAppState());
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/microsoft/auth') {
+    try {
+      const config = microsoftConfig();
+      const state = randomUUID();
+      await settingsCollection.updateOne(
+        { key: microsoftAuthStateKey },
+        { $set: { key: microsoftAuthStateKey, state, createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+
+      const authUrl = new URL(`https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/authorize`);
+      authUrl.searchParams.set('client_id', config.clientId);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', config.redirectUri);
+      authUrl.searchParams.set('response_mode', 'query');
+      authUrl.searchParams.set('scope', graphScopes.join(' '));
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('prompt', 'consent');
+
+      response.writeHead(302, { Location: authUrl.toString() });
+      return response.end();
+    } catch (error) {
+      return html(response, 500, microsoftConnectionPage('Microsoft Mail Not Configured', error.message));
+    }
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/microsoft/callback') {
+    const error = url.searchParams.get('error');
+    if (error) {
+      return html(
+        response,
+        400,
+        microsoftConnectionPage('Microsoft Mail Connection Failed', url.searchParams.get('error_description') || error)
+      );
+    }
+
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const savedState = await settingsCollection.findOne({ key: microsoftAuthStateKey });
+
+    if (!code || !state || state !== savedState?.state) {
+      return html(response, 400, microsoftConnectionPage('Microsoft Mail Connection Failed', 'The sign-in response did not match this server request. Please open the connect link again.'));
+    }
+
+    try {
+      await exchangeMicrosoftCode(code);
+      await settingsCollection.deleteOne({ key: microsoftAuthStateKey });
+      return html(response, 200, microsoftConnectionPage('Microsoft Mail Connected', 'Onboarding emails can now be sent automatically when admin verifies future payments.'));
+    } catch (tokenError) {
+      return html(response, 500, microsoftConnectionPage('Microsoft Mail Connection Failed', tokenError.message));
+    }
   }
 
   if (request.method === 'POST' && url.pathname === '/api/auth/login') {
