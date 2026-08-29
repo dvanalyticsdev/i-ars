@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { db } from '../db';
 import { AppSettings, Counselor, DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, UserSession, COURSES, CourseKey, OnboardingTemplate } from '../types';
 import { 
@@ -40,6 +40,49 @@ interface AdminDashboardProps {
   onboardingTemplates: OnboardingTemplate[];
   onDataChange: () => Promise<void>;
 }
+
+interface RichHtmlEditorProps {
+  value: string;
+  onChange: (value: string) => void;
+  minHeightClass?: string;
+}
+
+const RichHtmlEditor: React.FC<RichHtmlEditorProps> = ({ value, onChange, minHeightClass = 'min-h-[420px]' }) => {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const lastValueRef = useRef(value);
+
+  useEffect(() => {
+    if (!editorRef.current || lastValueRef.current === value) {
+      return;
+    }
+
+    editorRef.current.innerHTML = value || '<p><br></p>';
+    lastValueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    if (editorRef.current && !editorRef.current.innerHTML) {
+      editorRef.current.innerHTML = value || '<p><br></p>';
+    }
+  }, []);
+
+  const handleInput = () => {
+    const nextValue = editorRef.current?.innerHTML || '';
+    lastValueRef.current = nextValue;
+    onChange(nextValue);
+  };
+
+  return (
+    <div
+      ref={editorRef}
+      contentEditable
+      suppressContentEditableWarning
+      onInput={handleInput}
+      onBlur={handleInput}
+      className={`prose max-w-none rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b] ${minHeightClass}`}
+    />
+  );
+};
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   session, 
@@ -1691,18 +1734,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
                     Email Body
                   </label>
-                  <div
+                  <RichHtmlEditor
                     key={`template-editor-${selectedTemplateCourse}-${selectedTemplate?.updatedAt || 'new'}`}
-                    contentEditable
-                    suppressContentEditableWarning
-                    onBlur={(event) => setTemplateBodyDrafts(current => ({
+                    value={templateBodyDraft || '<p>Dear {{studentName}},</p>'}
+                    onChange={(nextHtml) => setTemplateBodyDrafts(current => ({
                       ...current,
-                      [selectedTemplateCourse]: event.currentTarget.innerHTML
+                      [selectedTemplateCourse]: nextHtml
                     }))}
-                    className="prose min-h-[420px] max-w-none rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
-                    dangerouslySetInnerHTML={{
-                      __html: templateBodyDraft || '<p>Dear {{studentName}},</p>'
-                    }}
                   />
                 </div>
 
@@ -2088,13 +2126,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
                     Mail Body
                   </label>
-                  <div
+                  <RichHtmlEditor
                     key={`preview-editor-${emailPreview.registration.id}`}
-                    contentEditable
-                    suppressContentEditableWarning
-                    onBlur={(event) => setEmailPreview(current => current ? { ...current, html: event.currentTarget.innerHTML } : current)}
-                    className="prose min-h-[420px] max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
-                    dangerouslySetInnerHTML={{ __html: emailPreview.html }}
+                    value={emailPreview.html}
+                    onChange={(nextHtml) => setEmailPreview(current => current ? { ...current, html: nextHtml } : current)}
                   />
                 </div>
               </div>
