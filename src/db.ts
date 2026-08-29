@@ -18,10 +18,17 @@ const apiRequest = async <T>(path: string, options: RequestInit = {}): Promise<T
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload: any = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
 
   if (!response.ok) {
-    throw new Error(payload?.message || 'Request failed.');
+    throw new Error(payload?.message || `${response.status} ${response.statusText || 'Request failed.'}`.trim());
   }
 
   return payload as T;
