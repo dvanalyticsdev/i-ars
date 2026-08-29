@@ -5,6 +5,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypt
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MongoClient } from 'mongodb';
+import nodemailer from 'nodemailer';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const envPath = join(__dirname, '.env');
@@ -32,6 +33,7 @@ await loadEnvFile();
 
 const distDir = join(__dirname, 'dist');
 const logoDir = join(__dirname, 'Logo');
+const consentFormPath = join(__dirname, 'attachments', 'DV Admission and Consent Form.pdf');
 const port = Number(process.env.PORT || 3600);
 const defaultTokenAmount = 5000;
 const apiVersion = '2025-01-01';
@@ -40,6 +42,7 @@ const cashfreeBaseUrl = cashfreeEnv === 'sandbox' ? 'https://sandbox.cashfree.co
 const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
 const mongoDbName = process.env.MONGODB_DB_NAME || 'i-ars';
 const formatCurrency = amount => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
+const formatRs = amount => `Rs ${Number(amount || 0).toLocaleString('en-IN')}`;
 
 const createPasswordFields = password => {
   const passwordSalt = randomBytes(16).toString('hex');
@@ -98,6 +101,59 @@ const COURSES = {
 };
 const POST_REGISTRATION_PAYMENT_TYPES = ['Loan', 'Internal EMI', 'Will decide later'];
 const defaultPostRegistrationPaymentType = 'Will decide later';
+const ONBOARDING_COURSES = new Set(['APIDA', 'APIDS', 'FDE']);
+
+const escapeHtml = value => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const addMonths = (dateStr, months) => {
+  const date = new Date(dateStr);
+  date.setMonth(date.getMonth() + months);
+  return date.toISOString();
+};
+
+const ordinalDay = day => {
+  if (day > 3 && day < 21) return `${day}th`;
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th';
+  return `${day}${suffix}`;
+};
+
+const formatMailDate = dateStr => {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr || '';
+  return `${ordinalDay(date.getDate())} ${date.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`;
+};
+
+const batchCode = dateStr => {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const courseMailConfig = {
+  APIDA: {
+    fullName: 'Advanced Program in Data Analytics (APIDA)',
+    welcomeName: batch => `APIDA Batch - ${batch}`,
+    videoDashboard: 'Watch and download training videos.',
+    ram: '8GB or more'
+  },
+  APIDS: {
+    fullName: 'Advanced Program in Industrial Data Science (APIDS)',
+    welcomeName: batch => `APIDS Batch - ${batch}`,
+    videoDashboard: 'Watch class videos and download study materials and assignments.',
+    ram: '16GB or more'
+  },
+  FDE: {
+    fullName: 'Master AI Forward Deployment Engineer Program (FDE)',
+    welcomeName: batch => `Master AI Forward Deployment Engineer Program FDE Batch - ${batch}`,
+    videoDashboard: 'Watch class videos and download study materials and assignments.',
+    ram: '16GB or more'
+  }
+};
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -184,6 +240,165 @@ const getAppState = async () => ({
   counselors: (await counselorsCollection.find({}, { projection: { _id: 0, passwordHash: 0, passwordSalt: 0 } }).sort({ createdAt: 1 }).toArray()),
   registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray()).map(normalizeRegistration)
 });
+
+const buildPaymentScheduleHtml = registration => {
+  const proceedingType = registration.postRegistrationPaymentType || defaultPostRegistrationPaymentType;
+  const balance = Math.max(0, Number(registration.finalPayable || 0) - Number(registration.minTokenFee || 0));
+
+  if (proceedingType === 'Loan') {
+    return `
+      <p><strong>Payment Schedule:</strong></p>
+      <p>${formatRs(registration.minTokenFee)} - Paid at the time of registration. The balance amount of ${formatRs(balance)} needs to be paid by Loan on or before ${escapeHtml(formatMailDate(registration.batchDate))}.</p>
+    `;
+  }
+
+  if (proceedingType === 'Internal EMI') {
+    const first = Math.floor(balance / 3);
+    const second = Math.floor(balance / 3);
+    const third = balance - first - second;
+    return `
+      <p><strong>Payment Schedule:</strong></p>
+      <p>${formatRs(registration.minTokenFee)} - Paid at the time of Registration. Balance ${formatRs(balance)} needs to be paid by the following instalments:</p>
+      <ul>
+        <li>${formatRs(first)} is due to pay by ${escapeHtml(formatMailDate(registration.batchDate))}</li>
+        <li>${formatRs(second)} is due to pay by ${escapeHtml(formatMailDate(addMonths(registration.batchDate, 1)))}</li>
+        <li>${formatRs(third)} is due to pay by ${escapeHtml(formatMailDate(addMonths(registration.batchDate, 2)))}</li>
+      </ul>
+    `;
+  }
+
+  return `
+    <p><strong>Payment Schedule:</strong></p>
+    <p>${formatRs(registration.minTokenFee)} - Paid at the time of registration. The remaining balance of ${formatRs(balance)} is pending, and the admissions team will coordinate with you to finalize whether it will be completed through Loan or Internal EMI.</p>
+  `;
+};
+
+const buildOnboardingEmail = registration => {
+  const config = courseMailConfig[registration.courseKey];
+  const batch = batchCode(registration.batchDate);
+  const discountSentence = Number(registration.discount || 0) > 0
+    ? ` and you have received a discount of ${formatRs(registration.discount)}`
+    : '';
+
+  return {
+    subject: `Welcome to DV Data & Analytics - ${registration.courseKey} Batch ${batch}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.55; font-size: 15px;">
+        <p><strong>Dear ${escapeHtml(registration.name)},</strong></p>
+        <p>Welcome to <strong>DV Data & Analytics</strong>! We are thrilled to have you join India's pioneering career-based industrial Data Science training program. On behalf of the entire DV team, we extend a warm welcome to <strong>${escapeHtml(config.welcomeName(batch))}</strong>.</p>
+        <p>You are about to embark on an exciting learning journey that will elevate your skills and expertise in Data Science. Our <strong>Training & Development team</strong> is dedicated to ensuring a seamless and enriching learning experience for you.</p>
+
+        <h3>Onboarding Details</h3>
+        <h4>1. Required Documents</h4>
+        <p><strong>Attached:</strong> Consent Form</p>
+        <p><strong>Action Required:</strong> Kindly sign and submit the form within <strong>2 days</strong> from the date of this email to receive access to our <strong>Learning Management System (LMS)</strong>.</p>
+
+        <h4>2. LMS Access Information</h4>
+        <p>Upon enrollment, you will gain access to:</p>
+        <ul>
+          <li><strong>Video Dashboard</strong> - ${escapeHtml(config.videoDashboard)}</li>
+          <li><strong>Study Materials</strong> - Comprehensive learning resources.</li>
+          <li><strong>Student Mentorship</strong> - Personalized guidance from industry experts.</li>
+          <li><strong>WhatsApp Support Group</strong> - Access provided one day before program commencement.</li>
+        </ul>
+        <p><strong>LMS Access Duration:</strong></p>
+        <ul>
+          <li><strong>Batch-wise access:</strong> 12 months from the date of enrollment.</li>
+          <li><strong>Self-paced review access:</strong> Additional 12 months after batch completion.</li>
+        </ul>
+        <p><strong>To activate LMS access:</strong></p>
+        <ol>
+          <li>Log in to the DV Analytics Registration Portal.</li>
+          <li>Complete the admission process.</li>
+          <li>Approve the Consent Form.</li>
+        </ol>
+
+        <h4>3. System Requirements</h4>
+        <p>For an optimal learning experience, ensure your system meets the following specifications:</p>
+        <ul>
+          <li><strong>Operating System:</strong> Windows 10 or above</li>
+          <li><strong>Processor:</strong> Intel i3 or higher</li>
+          <li><strong>RAM:</strong> ${escapeHtml(config.ram)}</li>
+          <li><strong>Storage:</strong> 512GB SSD/HDD or higher</li>
+        </ul>
+
+        <h4>4. Course Fees & Payment Schedule</h4>
+        <p>The total fee for the <strong>${escapeHtml(config.fullName)}</strong> is <strong>${formatRs(registration.baseFee)}</strong>${discountSentence}. The final committed fees that you need to pay is <strong>${formatRs(registration.finalPayable)}</strong>.</p>
+        ${buildPaymentScheduleHtml(registration)}
+
+        <p><strong>Bank Details for Fee Payment:</strong></p>
+        <ul>
+          <li><strong>Account Name:</strong> DV DATA & ANALYTICS Pvt Ltd.</li>
+          <li><strong>Account Type:</strong> Current</li>
+          <li><strong>Account Number:</strong> 343505001332</li>
+          <li><strong>Bank:</strong> ICICI</li>
+          <li><strong>Branch:</strong> Mallesh Palya Main Road</li>
+          <li><strong>IFSC Code:</strong> ICIC0003435</li>
+        </ul>
+        <p><strong>Payment Link:</strong> <a href="https://dvanalyticsmds.com/payment">https://dvanalyticsmds.com/payment</a></p>
+
+        <h4>5. Contact Information</h4>
+        <p>For any assistance or inquiries, please reach out to the respective support teams:</p>
+        <ul>
+          <li><strong>Finance & LMS Access:</strong> Mr. Sajid - 8431424165</li>
+          <li><strong>Student Mentorship:</strong> Mrs. Lakshmi - 7907991738</li>
+          <li><strong>Escalations:</strong> Mr. Ajith - 9916000655</li>
+          <li><strong>Class Schedules:</strong> Ms. Sanjana - 9611276828</li>
+        </ul>
+
+        <p>If you have any questions or require further assistance, please do not hesitate to contact us. We are excited to support you on your journey to becoming a <strong>Data Science & AI expert</strong>!</p>
+        <p><strong>Best Regards,</strong><br/>DV Data & Analytics Team</p>
+        <p><strong>Email:</strong> support@dvdataanalytics.com | md.sajid@dvdataanalytics.com<br/>
+        <strong>Contact:</strong> +91 8431424165 | 9611276828<br/>
+        <strong>Website:</strong> <a href="https://www.dvanalyticsmds.com">www.dvanalyticsmds.com</a></p>
+      </div>
+    `
+  };
+};
+
+const sendOnboardingEmail = async registration => {
+  const normalized = normalizeRegistration(registration);
+
+  if (!ONBOARDING_COURSES.has(normalized.courseKey)) {
+    return { status: 'skipped', error: 'Onboarding email is not configured for this course.' };
+  }
+
+  if (normalized.onboardingEmailStatus === 'sent' || normalized.onboardingEmailSentAt) {
+    return { status: 'sent', sentAt: normalized.onboardingEmailSentAt };
+  }
+
+  const user = process.env.OUTLOOK_SMTP_USER;
+  const pass = process.env.OUTLOOK_SMTP_PASS;
+  if (!user || !pass) {
+    throw new Error('Outlook SMTP is not configured. Set OUTLOOK_SMTP_USER and OUTLOOK_SMTP_PASS.');
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.OUTLOOK_SMTP_HOST || 'smtp.office365.com',
+    port: Number(process.env.OUTLOOK_SMTP_PORT || 587),
+    secure: false,
+    auth: { user, pass },
+    tls: { ciphers: 'TLSv1.2' }
+  });
+
+  const email = buildOnboardingEmail(normalized);
+  const fromName = process.env.OUTLOOK_FROM_NAME || 'DV Data & Analytics';
+  await transporter.sendMail({
+    from: `"${fromName}" <${user}>`,
+    to: normalized.email,
+    cc: process.env.ONBOARDING_CC || undefined,
+    subject: email.subject,
+    html: email.html,
+    attachments: [
+      {
+        filename: 'DV Admission and Consent Form.pdf',
+        path: consentFormPath
+      }
+    ]
+  });
+
+  return { status: 'sent', sentAt: new Date().toISOString() };
+};
 
 const json = (response, statusCode, payload) => {
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -613,7 +828,31 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, normalizeRegistration(result));
+    let normalized = normalizeRegistration(result);
+    if (!normalized.onboardingEmailSentAt && normalized.onboardingEmailStatus !== 'sent') {
+      const attemptedAt = new Date().toISOString();
+      try {
+        const emailResult = await sendOnboardingEmail(normalized);
+        const emailUpdate = {
+          onboardingEmailStatus: emailResult.status,
+          onboardingEmailAttemptedAt: attemptedAt,
+          onboardingEmailError: emailResult.error || null,
+          ...(emailResult.sentAt ? { onboardingEmailSentAt: emailResult.sentAt } : {})
+        };
+        await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
+        normalized = { ...normalized, ...emailUpdate };
+      } catch (error) {
+        const emailUpdate = {
+          onboardingEmailStatus: 'failed',
+          onboardingEmailAttemptedAt: attemptedAt,
+          onboardingEmailError: error instanceof Error ? error.message : 'Unable to send onboarding email.'
+        };
+        await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
+        normalized = { ...normalized, ...emailUpdate };
+      }
+    }
+
+    return json(response, 200, normalized);
   }
 
   const registrationDropoutMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/dropout$/);

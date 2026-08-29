@@ -13,6 +13,7 @@ Upload the deployment zip contents to your server.
 Required runtime files:
 - `dist/`
 - `Logo/`
+- `attachments/DV Admission and Consent Form.pdf`
 - `server.mjs`
 - `package.json`
 - `.env`
@@ -30,6 +31,10 @@ APP_BASE_URL=https://ars.dvanalyticsmds.in
 PORT=3600
 MONGODB_URI=mongodb://127.0.0.1:27017
 MONGODB_DB_NAME=i-ars
+OUTLOOK_SMTP_USER=your-outlook-email@example.com
+OUTLOOK_SMTP_PASS=your-outlook-app-password
+OUTLOOK_FROM_NAME=DV Data & Analytics
+ONBOARDING_CC=
 ```
 
 Use your real HTTPS domain for `APP_BASE_URL`.

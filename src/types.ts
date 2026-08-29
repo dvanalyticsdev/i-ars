@@ -71,6 +71,10 @@ export interface StudentRegistration {
   submittedAt: string | null;
   verifiedAt: string | null;
   verifiedByAdminEmail: string | null;
+  onboardingEmailStatus?: 'sent' | 'failed' | 'skipped';
+  onboardingEmailSentAt?: string | null;
+  onboardingEmailAttemptedAt?: string | null;
+  onboardingEmailError?: string | null;
   dropoutAt?: string | null;
   dropoutByAdminEmail?: string | null;
 }

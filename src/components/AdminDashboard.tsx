@@ -378,6 +378,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setSelectedReg(updated);
       }
       await onDataChange();
+      if (updated.onboardingEmailStatus === 'failed') {
+        alert(`Payment verified, but onboarding email was not sent: ${updated.onboardingEmailError || 'Unknown email error.'}`);
+      }
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to approve this enrollment.');
     }
@@ -1493,6 +1496,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <div className="text-green-700 mt-1 font-semibold flex items-center gap-1">
                           <Check className="w-3.5 h-3.5" />
                           <span>Verified on {new Date(selectedReg.verifiedAt).toLocaleDateString()} by {selectedReg.verifiedByAdminEmail}</span>
+                        </div>
+                      )}
+                      {selectedReg.onboardingEmailStatus && (
+                        <div>
+                          <span className="text-gray-400">Onboarding Email:</span>{' '}
+                          <span className={`font-semibold ${
+                            selectedReg.onboardingEmailStatus === 'sent'
+                              ? 'text-green-700'
+                              : selectedReg.onboardingEmailStatus === 'failed'
+                                ? 'text-red-600'
+                                : 'text-gray-600'
+                          }`}>
+                            {selectedReg.onboardingEmailStatus === 'sent'
+                              ? `Sent${selectedReg.onboardingEmailSentAt ? ` on ${new Date(selectedReg.onboardingEmailSentAt).toLocaleString()}` : ''}`
+                              : selectedReg.onboardingEmailStatus === 'skipped'
+                                ? 'Skipped for this course'
+                                : 'Failed'}
+                          </span>
+                          {selectedReg.onboardingEmailError && (
+                            <div className="mt-1 text-red-600">{selectedReg.onboardingEmailError}</div>
+                          )}
                         </div>
                       )}
                     </div>
