@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppSettings, Counselor, CourseKey, StudentRegistration, UserSession } from './types';
+import { AppSettings, Counselor, CourseKey, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
 
 interface AppState {
   settings: AppSettings;
@@ -96,6 +96,7 @@ export const db = {
     batchDate: string,
     counselorId: string,
     counselorName: string,
+    postRegistrationPaymentType: PostRegistrationPaymentType,
     adminNote?: string | null,
     createdByAdmin?: boolean,
     transactionId?: string | null,
@@ -113,6 +114,7 @@ export const db = {
         batchDate,
         counselorId,
         counselorName,
+        postRegistrationPaymentType,
         adminNote,
         createdByAdmin,
         transactionId,

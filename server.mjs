@@ -96,6 +96,8 @@ const COURSES = {
   DAS: { key: 'DAS', name: 'DAS', defaultFee: 50000 },
   FDE: { key: 'FDE', name: 'FDE', defaultFee: 80000 }
 };
+const POST_REGISTRATION_PAYMENT_TYPES = ['Loan', 'Internal EMI', 'Will decide later'];
+const defaultPostRegistrationPaymentType = 'Will decide later';
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -149,6 +151,11 @@ const ensureSeedData = async () => {
     { linkGenerationBlocked: { $exists: false } },
     { $set: { linkGenerationBlocked: false, linkGenerationNote: null } }
   );
+
+  await registrationsCollection.updateMany(
+    { postRegistrationPaymentType: { $exists: false } },
+    { $set: { postRegistrationPaymentType: defaultPostRegistrationPaymentType } }
+  );
 };
 
 await ensureSeedData();
@@ -165,10 +172,17 @@ const getSettings = async () => {
   return settings || { tokenAmount: defaultTokenAmount, updatedAt: new Date().toISOString() };
 };
 
+const normalizeRegistration = registration => ({
+  ...registration,
+  postRegistrationPaymentType: POST_REGISTRATION_PAYMENT_TYPES.includes(registration.postRegistrationPaymentType)
+    ? registration.postRegistrationPaymentType
+    : defaultPostRegistrationPaymentType
+});
+
 const getAppState = async () => ({
   settings: await getSettings(),
   counselors: (await counselorsCollection.find({}, { projection: { _id: 0, passwordHash: 0, passwordSalt: 0 } }).sort({ createdAt: 1 }).toArray()),
-  registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray())
+  registrations: (await registrationsCollection.find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray()).map(normalizeRegistration)
 });
 
 const json = (response, statusCode, payload) => {
@@ -396,6 +410,7 @@ const handleApi = async (request, response, url) => {
     const batchDate = String(body.batchDate || '').trim();
     const counselorId = String(body.counselorId || 'unknown');
     const counselorName = String(body.counselorName || 'Unknown Counselor');
+    const postRegistrationPaymentType = String(body.postRegistrationPaymentType || '').trim();
     const adminNote = String(body.adminNote || '').trim();
     const createdByAdmin = Boolean(body.createdByAdmin);
     const transactionId = String(body.transactionId || '').trim();
@@ -403,6 +418,10 @@ const handleApi = async (request, response, url) => {
 
     if (!name || !phone || !email || !batchDate || !COURSES[courseKey]) {
       return json(response, 400, { message: 'Student details, course, and batch date are required.' });
+    }
+
+    if (!POST_REGISTRATION_PAYMENT_TYPES.includes(postRegistrationPaymentType)) {
+      return json(response, 400, { message: 'Post registration payment proceeding type is required.' });
     }
 
     if (!Number.isFinite(baseFee) || baseFee <= 0 || discount < 0 || discount > baseFee) {
@@ -449,6 +468,7 @@ const handleApi = async (request, response, url) => {
       transactionId: transactionId || null,
       screenshotUrl: createdByAdmin ? screenshotUrl : null,
       adminNote: adminNote || null,
+      postRegistrationPaymentType,
       createdByAdmin,
       generatedByCounselorId: counselorId,
       generatedByCounselorName: counselorName,
@@ -459,7 +479,7 @@ const handleApi = async (request, response, url) => {
     };
 
     await registrationsCollection.insertOne(registration);
-    return json(response, 200, registration);
+    return json(response, 200, normalizeRegistration(registration));
   }
 
   const registrationDeleteMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)$/);
@@ -515,7 +535,7 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, result);
+    return json(response, 200, normalizeRegistration(result));
   }
 
   const registrationPaymentMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/payment$/);
@@ -563,7 +583,7 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, result);
+    return json(response, 200, normalizeRegistration(result));
   }
 
   const registrationVerifyMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/verify$/);
@@ -593,7 +613,7 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, result);
+    return json(response, 200, normalizeRegistration(result));
   }
 
   const registrationDropoutMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/dropout$/);
@@ -623,7 +643,7 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, result);
+    return json(response, 200, normalizeRegistration(result));
   }
 
   if (request.method === 'POST' && url.pathname === '/api/cashfree/create-order') {

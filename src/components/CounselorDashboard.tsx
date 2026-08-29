@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
-import { StudentRegistration, CourseKey, COURSES, UserSession, Counselor } from '../types';
+import { DEFAULT_POST_REGISTRATION_PAYMENT_TYPE, POST_REGISTRATION_PAYMENT_TYPES, PostRegistrationPaymentType, StudentRegistration, CourseKey, COURSES, UserSession, Counselor } from '../types';
 import { 
   Link, 
   Copy, 
@@ -45,6 +45,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
   const [courseKey, setCourseKey] = useState<CourseKey>('APIDS');
   const [baseFee, setBaseFee] = useState<number>(COURSES['APIDS'].defaultFee);
   const [discount, setDiscount] = useState<number>(0);
+  const [postRegistrationPaymentType, setPostRegistrationPaymentType] = useState<PostRegistrationPaymentType | ''>('');
   const [batchDate, setBatchDate] = useState<string>(() => {
     const defaultDate = new Date();
     defaultDate.setDate(defaultDate.getDate() + 14); // 2 weeks from now
@@ -94,6 +95,11 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
       return;
     }
 
+    if (!postRegistrationPaymentType) {
+      alert('Please select the post registration payment proceeding type.');
+      return;
+    }
+
     if (baseFee <= 0) {
       alert('Base course fee must be greater than 0.');
       return;
@@ -119,7 +125,8 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
       discount,
       batchDate,
       session.counselorId || 'unknown',
-      session.name
+      session.name,
+      postRegistrationPaymentType
       );
 
       const studentLink = `${window.location.origin}/?studentId=${reg.id}`;
@@ -131,6 +138,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
       setPhone('');
       setEmail('');
       setDiscount(0);
+      setPostRegistrationPaymentType('');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to generate registration link.');
     }
@@ -307,6 +315,23 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                     <option key={key} value={key}>
                       {key}
                     </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+                  Post Registration Payment Proceeding Type
+                </label>
+                <select
+                  required
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#485d8b] focus:bg-white"
+                  value={postRegistrationPaymentType}
+                  onChange={(e) => setPostRegistrationPaymentType(e.target.value as PostRegistrationPaymentType)}
+                >
+                  <option value="">Select proceeding type</option>
+                  {POST_REGISTRATION_PAYMENT_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
               </div>
@@ -522,10 +547,14 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200/60">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200/60">
                         <div>
                           <p className="text-gray-400 font-medium">Selected Course</p>
                           <p className="font-semibold text-gray-800">{reg.courseKey}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Payment Proceeding</p>
+                          <p className="font-semibold text-gray-800">{reg.postRegistrationPaymentType || DEFAULT_POST_REGISTRATION_PAYMENT_TYPE}</p>
                         </div>
                         <div>
                           <p className="text-gray-400 font-medium">Batch Start Date</p>

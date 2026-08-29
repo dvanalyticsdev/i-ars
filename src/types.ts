@@ -1,4 +1,13 @@
 export type CourseKey = 'APIDA' | 'APIDS' | 'DAS' | 'FDE';
+export type PostRegistrationPaymentType = 'Loan' | 'Internal EMI' | 'Will decide later';
+
+export const POST_REGISTRATION_PAYMENT_TYPES: PostRegistrationPaymentType[] = [
+  'Loan',
+  'Internal EMI',
+  'Will decide later'
+];
+
+export const DEFAULT_POST_REGISTRATION_PAYMENT_TYPE: PostRegistrationPaymentType = 'Will decide later';
 
 export interface CourseInfo {
   key: CourseKey;
@@ -52,6 +61,7 @@ export interface StudentRegistration {
   transactionId: string | null;
   screenshotUrl: string | null; // Base64 mock screenshot or file upload data url
   adminNote: string | null;
+  postRegistrationPaymentType?: PostRegistrationPaymentType;
   createdByAdmin?: boolean;
   
   generatedByCounselorId: string;
