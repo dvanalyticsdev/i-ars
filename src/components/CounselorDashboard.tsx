@@ -547,7 +547,7 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200/60">
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs bg-gray-50 p-3 rounded-lg border border-gray-200/60">
                         <div>
                           <p className="text-gray-400 font-medium">Selected Course</p>
                           <p className="font-semibold text-gray-800">{reg.courseKey}</p>
@@ -561,6 +561,20 @@ export const CounselorDashboard: React.FC<CounselorDashboardProps> = ({
                           <p className="font-semibold text-gray-800">
                             {formatBatchDate(reg.batchDate)}
                           </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Onboarding Mail</p>
+                          {reg.onboardingEmailStatus === 'sent' ? (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>Sent</span>
+                            </span>
+                          ) : (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-500">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>Not Sent</span>
+                            </span>
+                          )}
                         </div>
                         <div>
                           <p className="text-gray-400 font-medium">Fee Details</p>

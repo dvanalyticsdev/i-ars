@@ -131,6 +131,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [batchFilters, setBatchFilters] = useState<string[]>([]);
   const [courseFilters, setCourseFilters] = useState<string[]>([]);
   const [counselorFilters, setCounselorFilters] = useState<string[]>([]);
+  const [mailStatusFilters, setMailStatusFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Selected Registration for Verification Modal
@@ -727,6 +728,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     { value: 'verified', label: 'Verified' },
     { value: 'dropout', label: 'Dropout' }
   ];
+  const mailStatusOptions = [
+    { value: 'sent', label: 'Mail Sent' },
+    { value: 'not_sent', label: 'Mail Not Sent' }
+  ];
 
   // Filtered registrations
   const filteredRegs = registrations.filter(reg => {
@@ -735,6 +740,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const matchesBatch = batchFilters.length === 0 || batchFilters.includes(reg.batchDate);
     const matchesCourse = courseFilters.length === 0 || courseFilters.includes(reg.courseKey);
     const matchesCounselor = counselorFilters.length === 0 || counselorFilters.includes(reg.generatedByCounselorId);
+    const mailStatus = reg.onboardingEmailStatus === 'sent' ? 'sent' : 'not_sent';
+    const matchesMailStatus = mailStatusFilters.length === 0 || mailStatusFilters.includes(mailStatus);
     const matchesSearch = 
       !query ||
       reg.name.toLowerCase().includes(query) ||
@@ -743,7 +750,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       reg.generatedByCounselorName.toLowerCase().includes(query) ||
       (reg.transactionId && reg.transactionId.toLowerCase().includes(query)) ||
       reg.courseKey.toLowerCase().includes(query);
-    return matchesFilter && matchesBatch && matchesCourse && matchesCounselor && matchesSearch;
+    return matchesFilter && matchesBatch && matchesCourse && matchesCounselor && matchesMailStatus && matchesSearch;
   });
 
   return (
@@ -1115,7 +1122,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 })}
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_180px_180px_180px]">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_170px_170px_170px_170px]">
                 <div className="relative md:col-span-2 xl:col-span-1">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                     <Search className="h-4 w-4" />
@@ -1156,6 +1163,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   selected={regFilters}
                   onChange={(values) => setRegFilters(values as Array<'pending_payment' | 'paid' | 'verified' | 'dropout'>)}
                   options={statusOptions}
+                />
+                <MultiSelectFilter
+                  label="Mail Status"
+                  allLabel="All Mail"
+                  selected={mailStatusFilters}
+                  onChange={setMailStatusFilters}
+                  options={mailStatusOptions}
                 />
               </div>
             </div>
