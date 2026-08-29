@@ -24,7 +24,8 @@ import {
   CalendarDays,
   Send,
   Pencil,
-  FileText
+  FileText,
+  Menu
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
 import { formatCourseLabel, formatCurrency } from '../format';
@@ -112,6 +113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [templateSubjectDrafts, setTemplateSubjectDrafts] = useState<Record<string, string>>({});
   const [templateBodyDrafts, setTemplateBodyDrafts] = useState<Record<string, string>>({});
   const [templateSavingCourse, setTemplateSavingCourse] = useState<string | null>(null);
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
   const getTemplate = (courseKey: CourseKey) =>
     onboardingTemplates.find(template => template.courseKey === courseKey) || null;
@@ -1102,7 +1104,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {/* List Table */}
-            <div className="overflow-x-auto">
+            <div className={`overflow-x-auto ${openActionMenuId ? 'pb-56' : ''}`}>
               {filteredRegs.length > 0 ? (
                 <table className="min-w-full divide-y divide-gray-255">
                   <thead className="bg-gray-50 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -1222,93 +1224,115 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </span>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <div className="flex justify-end gap-2">
-                            {reg.status !== 'dropout' && (
+                        <td className="relative px-6 py-4 whitespace-nowrap text-right">
+                          <button
+                            type="button"
+                            onClick={() => setOpenActionMenuId(openActionMenuId === reg.id ? null : reg.id)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition-all hover:border-[#485d8b] hover:text-[#485d8b]"
+                            title="Open actions"
+                          >
+                            <Menu className="h-4 w-4" />
+                          </button>
+
+                          {openActionMenuId === reg.id && (
+                            <div className="absolute right-6 top-14 z-40 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 text-left shadow-xl">
                               <button
                                 type="button"
-                                onClick={() => handleMarkDropout(reg)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 shadow-sm transition-all hover:bg-red-100"
-                                title="Mark as dropout"
+                                onClick={() => {
+                                  setSelectedReg(reg);
+                                  setOpenActionMenuId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                               >
-                                <AlertCircle className="w-3.5 h-3.5" />
-                                <span>Dropout</span>
+                                {reg.status === 'pending_payment' ? <IndianRupee className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                <span>
+                                  {reg.status === 'pending_payment'
+                                    ? 'Add Payment'
+                                    : reg.status === 'paid'
+                                      ? 'Review Payment'
+                                      : 'View Details'}
+                                </span>
                               </button>
-                            )}
-                            {canDownloadInvoice(reg) && (
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadInvoice(reg)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition-all hover:border-[#485d8b] hover:bg-[#485d8b] hover:text-white"
-                                title="Download temporary invoice"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>Invoice</span>
-                              </button>
-                            )}
-                            {canSendOnboardingEmail(reg) && (
-                              <>
+
+                              {canDownloadInvoice(reg) && (
                                 <button
                                   type="button"
-                                  onClick={() => handlePreviewOnboardingEmail(reg)}
-                                  disabled={emailPreviewLoadingId === reg.id}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-[#485d8b] shadow-sm transition-all hover:bg-indigo-100 disabled:opacity-60"
-                                  title="Preview onboarding email"
+                                  onClick={() => {
+                                    handleDownloadInvoice(reg);
+                                    setOpenActionMenuId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                                 >
-                                  <Eye className="w-3.5 h-3.5" />
-                                  <span>{emailPreviewLoadingId === reg.id ? 'Loading...' : 'Mail'}</span>
+                                  <Download className="h-4 w-4" />
+                                  <span>Invoice</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSendOnboardingEmail(reg)}
-                                  disabled={sendingEmailId === reg.id}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-green-100 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 shadow-sm transition-all hover:bg-green-100 disabled:opacity-60"
-                                  title="Send onboarding email"
-                                >
-                                  <Send className="w-3.5 h-3.5" />
-                                  <span>{sendingEmailId === reg.id ? 'Sending...' : 'Send'}</span>
-                                </button>
-                              </>
-                            )}
-                            {reg.onboardingEmailStatus === 'sent' && (
-                              <span className="inline-flex items-center gap-1 rounded-lg border border-green-100 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                <span>Mail Sent</span>
-                              </span>
-                            )}
-                            {reg.status === 'pending_payment' && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePendingRegistration(reg)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-red-100 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 shadow-sm transition-all hover:bg-red-50"
-                                title="Delete pending payment registration"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Delete</span>
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setSelectedReg(reg)}
-                              className={`inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg text-xs font-semibold transition-all shadow-sm ${
-                                reg.status === 'pending_payment'
-                                  ? 'border-[#485d8b] bg-[#485d8b] text-white hover:bg-[#3c4d73] hover:border-[#3c4d73]'
-                                  : 'border-gray-200 bg-white text-gray-700 hover:text-white hover:bg-[#485d8b] hover:border-[#485d8b]'
-                              }`}
-                            >
-                              {reg.status === 'pending_payment' ? (
-                                <IndianRupee className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
                               )}
-                              <span>
-                                {reg.status === 'pending_payment'
-                                  ? 'Add Payment'
-                                  : reg.status === 'paid'
-                                    ? 'Review Payment'
-                                    : 'View Details'}
-                              </span>
-                            </button>
-                          </div>
+
+                              {canSendOnboardingEmail(reg) && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handlePreviewOnboardingEmail(reg);
+                                      setOpenActionMenuId(null);
+                                    }}
+                                    disabled={emailPreviewLoadingId === reg.id}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-[#485d8b] hover:bg-indigo-50 disabled:opacity-60"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    <span>{emailPreviewLoadingId === reg.id ? 'Loading Mail...' : 'Preview Mail'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleSendOnboardingEmail(reg);
+                                      setOpenActionMenuId(null);
+                                    }}
+                                    disabled={sendingEmailId === reg.id}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
+                                  >
+                                    <Send className="h-4 w-4" />
+                                    <span>{sendingEmailId === reg.id ? 'Sending...' : 'Send Mail'}</span>
+                                  </button>
+                                </>
+                              )}
+
+                              {reg.onboardingEmailStatus === 'sent' && (
+                                <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-green-700">
+                                  <CheckCircle className="h-4 w-4" />
+                                  <span>Mail Sent</span>
+                                </div>
+                              )}
+
+                              {reg.status !== 'dropout' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleMarkDropout(reg);
+                                    setOpenActionMenuId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+                                >
+                                  <AlertCircle className="h-4 w-4" />
+                                  <span>Dropout</span>
+                                </button>
+                              )}
+
+                              {reg.status === 'pending_payment' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleDeletePendingRegistration(reg);
+                                    setOpenActionMenuId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  <span>Delete</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1665,17 +1689,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
-                    Email Body HTML
+                    Email Body
                   </label>
-                  <textarea
-                    rows={18}
-                    value={templateBodyDraft}
-                    onChange={(event) => setTemplateBodyDrafts(current => ({
+                  <div
+                    key={`template-editor-${selectedTemplateCourse}-${selectedTemplate?.updatedAt || 'new'}`}
+                    contentEditable
+                    suppressContentEditableWarning
+                    onBlur={(event) => setTemplateBodyDrafts(current => ({
                       ...current,
-                      [selectedTemplateCourse]: event.target.value
+                      [selectedTemplateCourse]: event.currentTarget.innerHTML
                     }))}
-                    placeholder="<p>Dear {{studentName}},</p>"
-                    className="min-h-[420px] w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                    className="prose min-h-[420px] max-w-none rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                    dangerouslySetInnerHTML={{
+                      __html: templateBodyDraft || '<p>Dear {{studentName}},</p>'
+                    }}
                   />
                 </div>
 
@@ -2044,7 +2071,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div><span className="font-semibold text-gray-500">Attachment:</span> <span className="text-gray-900">DV Admission and Consent Form.pdf</span></div>
             </div>
 
-            <div className="grid flex-1 gap-4 overflow-auto bg-white p-5 lg:grid-cols-2">
+            <div className="flex-1 space-y-4 overflow-auto bg-white p-5">
               <div className="space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
@@ -2059,22 +2086,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-gray-500">
-                    Email HTML
+                    Mail Body
                   </label>
-                  <textarea
-                    rows={18}
-                    value={emailPreview.html}
-                    onChange={(event) => setEmailPreview(current => current ? { ...current, html: event.target.value } : current)}
-                    className="min-h-[420px] w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                  <div
+                    key={`preview-editor-${emailPreview.registration.id}`}
+                    contentEditable
+                    suppressContentEditableWarning
+                    onBlur={(event) => setEmailPreview(current => current ? { ...current, html: event.currentTarget.innerHTML } : current)}
+                    className="prose min-h-[420px] max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#485d8b]"
+                    dangerouslySetInnerHTML={{ __html: emailPreview.html }}
                   />
                 </div>
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-gray-500">Preview</p>
-                <div
-                  className="prose max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm"
-                  dangerouslySetInnerHTML={{ __html: emailPreview.html }}
-                />
               </div>
             </div>
 
