@@ -21,7 +21,8 @@ import {
   Save,
   Eraser,
   Download,
-  CalendarDays
+  CalendarDays,
+  Send
 } from 'lucide-react';
 import { downloadTemporaryInvoice as downloadInvoicePdf } from '../invoice';
 import { formatCourseLabel, formatCurrency } from '../format';
@@ -92,6 +93,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [batchDrafts, setBatchDrafts] = useState<Record<string, string>>({});
   const [batchSavingId, setBatchSavingId] = useState<string | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{
+    registration: StudentRegistration;
+    to: string;
+    cc: string[];
+    subject: string;
+    html: string;
+  } | null>(null);
+  const [emailPreviewLoadingId, setEmailPreviewLoadingId] = useState<string | null>(null);
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
 
   React.useEffect(() => {
     setTokenAmount(settings.tokenAmount);
@@ -378,11 +388,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setSelectedReg(updated);
       }
       await onDataChange();
-      if (updated.onboardingEmailStatus === 'failed') {
-        alert(`Payment verified, but onboarding email was not sent: ${updated.onboardingEmailError || 'Unknown email error.'}`);
-      }
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to approve this enrollment.');
+    }
+  };
+
+  const canSendOnboardingEmail = (registration: StudentRegistration) =>
+    registration.status === 'verified'
+    && registration.courseKey !== 'DAS'
+    && registration.onboardingEmailStatus !== 'sent'
+    && !registration.onboardingEmailSentAt;
+
+  const handlePreviewOnboardingEmail = async (registration: StudentRegistration) => {
+    try {
+      setEmailPreviewLoadingId(registration.id);
+      const preview = await db.previewOnboardingEmail(registration.id);
+      setEmailPreview({ registration, ...preview });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to prepare onboarding email preview.');
+    } finally {
+      setEmailPreviewLoadingId(null);
+    }
+  };
+
+  const handleSendOnboardingEmail = async (registration: StudentRegistration) => {
+    if (!confirm(`Send onboarding email to ${registration.name}?`)) {
+      return;
+    }
+
+    try {
+      setSendingEmailId(registration.id);
+      const updated = await db.sendOnboardingEmail(registration.id, session.email);
+      if (selectedReg?.id === registration.id) {
+        setSelectedReg(updated);
+      }
+      if (emailPreview?.registration.id === registration.id) {
+        setEmailPreview(null);
+      }
+      await onDataChange();
+      alert('Onboarding email sent.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to send onboarding email.');
+      await onDataChange();
+    } finally {
+      setSendingEmailId(null);
     }
   };
 
@@ -1084,6 +1133,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <span>Invoice</span>
                               </button>
                             )}
+                            {canSendOnboardingEmail(reg) && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePreviewOnboardingEmail(reg)}
+                                  disabled={emailPreviewLoadingId === reg.id}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-[#485d8b] shadow-sm transition-all hover:bg-indigo-100 disabled:opacity-60"
+                                  title="Preview onboarding email"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>{emailPreviewLoadingId === reg.id ? 'Loading...' : 'Mail'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendOnboardingEmail(reg)}
+                                  disabled={sendingEmailId === reg.id}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-green-100 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 shadow-sm transition-all hover:bg-green-100 disabled:opacity-60"
+                                  title="Send onboarding email"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>{sendingEmailId === reg.id ? 'Sending...' : 'Send'}</span>
+                                </button>
+                              </>
+                            )}
+                            {reg.onboardingEmailStatus === 'sent' && (
+                              <span className="inline-flex items-center gap-1 rounded-lg border border-green-100 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                <span>Mail Sent</span>
+                              </span>
+                            )}
                             {reg.status === 'pending_payment' && (
                               <button
                                 type="button"
@@ -1514,6 +1593,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 ? 'Skipped for this course'
                                 : 'Failed'}
                           </span>
+                          {selectedReg.onboardingEmailSentByAdminEmail && (
+                            <div className="mt-1 text-gray-500">Sent by {selectedReg.onboardingEmailSentByAdminEmail}</div>
+                          )}
                           {selectedReg.onboardingEmailError && (
                             <div className="mt-1 text-red-600">{selectedReg.onboardingEmailError}</div>
                           )}
@@ -1562,6 +1644,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               )}
 
+              {canSendOnboardingEmail(selectedReg) && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => handlePreviewOnboardingEmail(selectedReg)}
+                    disabled={emailPreviewLoadingId === selectedReg.id}
+                    className="inline-flex items-center gap-1.5 px-5 py-2 border border-indigo-100 bg-indigo-50 text-[#485d8b] hover:bg-indigo-100 font-semibold rounded-lg text-sm transition-colors shadow-sm disabled:opacity-60"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span>{emailPreviewLoadingId === selectedReg.id ? 'Loading...' : 'Preview Mail'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendOnboardingEmail(selectedReg)}
+                    disabled={sendingEmailId === selectedReg.id}
+                    className="inline-flex items-center gap-1.5 px-5 py-2 border border-green-100 bg-green-50 text-green-700 hover:bg-green-100 font-semibold rounded-lg text-sm transition-colors shadow-sm disabled:opacity-60"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{sendingEmailId === selectedReg.id ? 'Sending...' : 'Send Mail'}</span>
+                  </button>
+                </>
+              )}
+
               {selectedReg.status !== 'dropout' && (
                 <button
                   type="button"
@@ -1593,6 +1698,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span>Approve Enrollment</span>
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {emailPreview && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Onboarding Email Preview</p>
+                <h3 className="mt-1 text-xl font-black text-gray-900">{emailPreview.registration.name}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmailPreview(null)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                title="Close preview"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 border-b border-gray-200 bg-gray-50 p-5 text-sm">
+              <div><span className="font-semibold text-gray-500">To:</span> <span className="text-gray-900">{emailPreview.to}</span></div>
+              {emailPreview.cc.length > 0 && (
+                <div><span className="font-semibold text-gray-500">CC:</span> <span className="text-gray-900">{emailPreview.cc.join(', ')}</span></div>
+              )}
+              <div><span className="font-semibold text-gray-500">Subject:</span> <span className="text-gray-900">{emailPreview.subject}</span></div>
+              <div><span className="font-semibold text-gray-500">Attachment:</span> <span className="text-gray-900">DV Admission and Consent Form.pdf</span></div>
+            </div>
+
+            <div className="flex-1 overflow-auto bg-white p-5">
+              <div
+                className="prose max-w-none rounded-lg border border-gray-200 bg-white p-5 text-sm"
+                dangerouslySetInnerHTML={{ __html: emailPreview.html }}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-gray-200 bg-gray-50 p-5">
+              <button
+                type="button"
+                onClick={() => setEmailPreview(null)}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-650 transition-colors hover:bg-gray-150"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendOnboardingEmail(emailPreview.registration)}
+                disabled={sendingEmailId === emailPreview.registration.id}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-green-100 transition-colors hover:bg-green-700 disabled:opacity-60"
+              >
+                <Send className="h-4 w-4" />
+                <span>{sendingEmailId === emailPreview.registration.id ? 'Sending...' : 'Send Mail'}</span>
+              </button>
             </div>
           </div>
         </div>

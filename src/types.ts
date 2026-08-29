@@ -73,10 +73,18 @@ export interface StudentRegistration {
   verifiedByAdminEmail: string | null;
   onboardingEmailStatus?: 'sent' | 'failed' | 'skipped';
   onboardingEmailSentAt?: string | null;
+  onboardingEmailSentByAdminEmail?: string | null;
   onboardingEmailAttemptedAt?: string | null;
   onboardingEmailError?: string | null;
   dropoutAt?: string | null;
   dropoutByAdminEmail?: string | null;
+}
+
+export interface OnboardingEmailPreview {
+  to: string;
+  cc: string[];
+  subject: string;
+  html: string;
 }
 
 export interface UserSession {

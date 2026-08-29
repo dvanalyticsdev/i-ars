@@ -520,6 +520,24 @@ const sendOnboardingEmail = async registration => {
   return { status: 'sent', sentAt: new Date().toISOString() };
 };
 
+const onboardingEmailPreview = async registration => {
+  const normalized = normalizeRegistration(registration);
+
+  if (!ONBOARDING_COURSES.has(normalized.courseKey)) {
+    throw new Error('Onboarding email is not configured for this course.');
+  }
+
+  const email = buildOnboardingEmail(normalized);
+  const ccRecipients = await onboardingCcRecipients(normalized);
+
+  return {
+    to: normalized.email,
+    cc: ccRecipients.map(recipient => recipient.emailAddress.address),
+    subject: email.subject,
+    html: email.html
+  };
+};
+
 const json = (response, statusCode, payload) => {
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
@@ -647,7 +665,7 @@ const handleApi = async (request, response, url) => {
     try {
       await exchangeMicrosoftCode(code);
       await settingsCollection.deleteOne({ key: microsoftAuthStateKey });
-      return html(response, 200, microsoftConnectionPage('Microsoft Mail Connected', 'Onboarding emails can now be sent automatically when admin verifies future payments.'));
+      return html(response, 200, microsoftConnectionPage('Microsoft Mail Connected', 'Onboarding emails can now be sent when admin previews and clicks Send Mail after verification.'));
     } catch (tokenError) {
       return html(response, 500, microsoftConnectionPage('Microsoft Mail Connection Failed', tokenError.message));
     }
@@ -1029,31 +1047,82 @@ const handleApi = async (request, response, url) => {
       return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    let normalized = normalizeRegistration(result);
-    if (!normalized.onboardingEmailSentAt && normalized.onboardingEmailStatus !== 'sent') {
-      const attemptedAt = new Date().toISOString();
-      try {
-        const emailResult = await sendOnboardingEmail(normalized);
-        const emailUpdate = {
-          onboardingEmailStatus: emailResult.status,
-          onboardingEmailAttemptedAt: attemptedAt,
-          onboardingEmailError: emailResult.error || null,
-          ...(emailResult.sentAt ? { onboardingEmailSentAt: emailResult.sentAt } : {})
-        };
-        await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
-        normalized = { ...normalized, ...emailUpdate };
-      } catch (error) {
-        const emailUpdate = {
-          onboardingEmailStatus: 'failed',
-          onboardingEmailAttemptedAt: attemptedAt,
-          onboardingEmailError: error instanceof Error ? error.message : 'Unable to send onboarding email.'
-        };
-        await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
-        normalized = { ...normalized, ...emailUpdate };
-      }
+    return json(response, 200, normalizeRegistration(result));
+  }
+
+  const registrationOnboardingPreviewMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/onboarding-email$/);
+  if (request.method === 'GET' && registrationOnboardingPreviewMatch) {
+    const id = decodeURIComponent(registrationOnboardingPreviewMatch[1]);
+    const registration = await registrationsCollection.findOne({ id }, { projection: { _id: 0 } });
+
+    if (!registration) {
+      return json(response, 404, { message: 'Registration was not found.' });
     }
 
-    return json(response, 200, normalized);
+    const normalized = normalizeRegistration(registration);
+
+    if (normalized.status !== 'verified') {
+      return json(response, 400, { message: 'Onboarding email can be previewed only after admin verifies the payment.' });
+    }
+
+    if (normalized.onboardingEmailStatus === 'sent' || normalized.onboardingEmailSentAt) {
+      return json(response, 400, { message: 'Onboarding email has already been sent for this registration.' });
+    }
+
+    try {
+      return json(response, 200, await onboardingEmailPreview(normalized));
+    } catch (error) {
+      return json(response, 400, { message: error instanceof Error ? error.message : 'Unable to prepare onboarding email.' });
+    }
+  }
+
+  const registrationOnboardingSendMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/onboarding-email\/send$/);
+  if (request.method === 'POST' && registrationOnboardingSendMatch) {
+    const id = decodeURIComponent(registrationOnboardingSendMatch[1]);
+    const body = await readJsonBody(request);
+    const adminEmail = String(body.adminEmail || '').trim().toLowerCase();
+
+    if (!adminEmail) {
+      return json(response, 400, { message: 'Admin email is required.' });
+    }
+
+    const registration = await registrationsCollection.findOne({ id }, { projection: { _id: 0 } });
+
+    if (!registration) {
+      return json(response, 404, { message: 'Registration was not found.' });
+    }
+
+    const normalized = normalizeRegistration(registration);
+
+    if (normalized.status !== 'verified') {
+      return json(response, 400, { message: 'Onboarding email can be sent only after admin verifies the payment.' });
+    }
+
+    if (normalized.onboardingEmailStatus === 'sent' || normalized.onboardingEmailSentAt) {
+      return json(response, 400, { message: 'Onboarding email has already been sent for this registration.' });
+    }
+
+    const attemptedAt = new Date().toISOString();
+    try {
+      const emailResult = await sendOnboardingEmail(normalized);
+      const emailUpdate = {
+        onboardingEmailStatus: emailResult.status,
+        onboardingEmailAttemptedAt: attemptedAt,
+        onboardingEmailError: emailResult.error || null,
+        onboardingEmailSentByAdminEmail: adminEmail,
+        ...(emailResult.sentAt ? { onboardingEmailSentAt: emailResult.sentAt } : {})
+      };
+      await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
+      return json(response, 200, { ...normalized, ...emailUpdate });
+    } catch (error) {
+      const emailUpdate = {
+        onboardingEmailStatus: 'failed',
+        onboardingEmailAttemptedAt: attemptedAt,
+        onboardingEmailError: error instanceof Error ? error.message : 'Unable to send onboarding email.'
+      };
+      await registrationsCollection.updateOne({ id }, { $set: emailUpdate });
+      return json(response, 500, { message: emailUpdate.onboardingEmailError });
+    }
   }
 
   const registrationDropoutMatch = url.pathname.match(/^\/api\/registrations\/([^/]+)\/dropout$/);

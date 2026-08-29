@@ -493,9 +493,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({ studentId, registr
               <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-xs text-green-800 text-left max-w-md mx-auto flex items-start gap-2.5 shadow-sm">
                 <Sparkles className="w-5 h-5 shrink-0 text-green-600 mt-0.5" />
                 <div>
-                  <span className="font-bold">Onboarding Instructions Triggered!</span>
+                  <span className="font-bold">Registration Fully Approved!</span>
                   <p className="text-green-700 mt-0.5">
-                    Your registration has been fully approved by the administration. Check your email for further onboarding details.
+                    Your onboarding instructions will be sent to your registered email by the administration.
                   </p>
                 </div>
               </div>

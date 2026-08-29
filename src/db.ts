@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AppSettings, Counselor, CourseKey, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
+import { AppSettings, Counselor, CourseKey, OnboardingEmailPreview, PostRegistrationPaymentType, StudentRegistration, UserSession } from './types';
 
 interface AppState {
   settings: AppSettings;
@@ -131,6 +131,15 @@ export const db = {
   verifyRegistration: (id: string, adminEmail: string) =>
     apiRequest<StudentRegistration>(`/api/registrations/${encodeURIComponent(id)}/verify`, {
       method: 'PATCH',
+      body: JSON.stringify({ adminEmail })
+    }),
+
+  previewOnboardingEmail: (id: string) =>
+    apiRequest<OnboardingEmailPreview>(`/api/registrations/${encodeURIComponent(id)}/onboarding-email`),
+
+  sendOnboardingEmail: (id: string, adminEmail: string) =>
+    apiRequest<StudentRegistration>(`/api/registrations/${encodeURIComponent(id)}/onboarding-email/send`, {
+      method: 'POST',
       body: JSON.stringify({ adminEmail })
     }),
 
