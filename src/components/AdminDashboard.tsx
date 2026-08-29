@@ -205,6 +205,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   }, [adminCounselorId, counselors]);
 
+  React.useEffect(() => {
+    if (!openActionMenuId) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-action-menu-root]')) {
+        setOpenActionMenuId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [openActionMenuId]);
+
   const handleUpdateTokenAmount = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -1267,7 +1281,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </span>
                           )}
                         </td>
-                        <td className="relative px-6 py-4 whitespace-nowrap text-right">
+                        <td className="relative px-6 py-4 whitespace-nowrap text-right" data-action-menu-root>
                           <button
                             type="button"
                             onClick={() => setOpenActionMenuId(openActionMenuId === reg.id ? null : reg.id)}

@@ -47,6 +47,28 @@ export const MultiSelectFilter: React.FC<MultiSelectFilterProps> = ({
     });
   };
 
+  React.useEffect(() => {
+    const closeOnOutsideInteraction = (event: MouseEvent) => {
+      const details = detailsRef.current;
+      if (details?.open && event.target instanceof Node && !details.contains(event.target)) {
+        details.open = false;
+      }
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && detailsRef.current?.open) {
+        detailsRef.current.open = false;
+      }
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideInteraction);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideInteraction);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
   return (
     <details
       ref={detailsRef}
