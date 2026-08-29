@@ -511,11 +511,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleUploadTemplateAttachment = (file: File | null) => {
     if (!file) return;
 
-    if (file.size > 5_000_000) {
-      alert('Attachment must be under 5 MB.');
-      return;
-    }
-
     const reader = new FileReader();
     reader.onload = async () => {
       try {

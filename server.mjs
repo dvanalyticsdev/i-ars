@@ -686,12 +686,12 @@ const microsoftConnectionPage = (title, message) => `
   </html>
 `;
 
-const readJsonBody = async request =>
+const readJsonBody = async (request, maxBodyLength = 1_000_000) =>
   new Promise((resolve, reject) => {
     let body = '';
     request.on('data', chunk => {
       body += chunk;
-      if (body.length > 8_000_000) {
+      if (maxBodyLength && body.length > maxBodyLength) {
         reject(new Error('Request body is too large.'));
         request.destroy();
       }
@@ -1013,7 +1013,7 @@ const handleApi = async (request, response, url) => {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/onboarding-attachments') {
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(request, 0);
     const name = String(body.name || '').trim();
     const contentType = String(body.contentType || 'application/octet-stream').trim();
     const dataUrl = String(body.dataUrl || '');
@@ -1024,8 +1024,8 @@ const handleApi = async (request, response, url) => {
     }
 
     const content = Buffer.from(match[2], 'base64');
-    if (content.length === 0 || content.length > 5_000_000) {
-      return json(response, 400, { message: 'Attachment must be under 5 MB.' });
+    if (content.length === 0) {
+      return json(response, 400, { message: 'Attachment file is empty.' });
     }
 
     const safeName = name.replace(/[^\w.\- ()]/g, '').trim() || 'attachment';
